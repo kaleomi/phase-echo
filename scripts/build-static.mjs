@@ -11,9 +11,12 @@ for (const dir of ['src', 'styles']) {
   await cp(new URL(`../${dir}/`, import.meta.url), new URL(`./${dir}/`, dist), { recursive: true });
 }
 
+// three.module.js imports the sibling three.core.js in current Three.js releases,
+// so copy the complete build directory instead of a single entry file.
 await cp(
-  new URL('../node_modules/three/build/three.module.js', import.meta.url),
-  new URL('./vendor/three.module.js', dist),
+  new URL('../node_modules/three/build/', import.meta.url),
+  new URL('./vendor/', dist),
+  { recursive: true },
 );
 await cp(
   new URL('../node_modules/three/examples/jsm/', import.meta.url),
