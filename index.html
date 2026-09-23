@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PHASE ECHO · 相位残影</title>
+  <link rel="stylesheet" href="styles/game.css">
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js", "three/addons/": "./node_modules/three/examples/jsm/" } }
+  </script>
+</head>
+<body data-state="menu" data-screen="menu">
+  <canvas id="game" tabindex="0"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="echo-tint"></div>
+    <div id="vignette"></div>
+    <div id="scope"><div class="lens"></div></div>
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <svg id="reload-ring" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" class="bg"/><circle id="reload-fill" cx="20" cy="20" r="18"/></svg>
+    <div id="indicators"></div>
+    <div id="damage-layer"></div>
+    <div id="top-left">
+      <div id="wave-label">STANDBY</div>
+      <div id="enemy-count"></div>
+      <div id="intermission"></div>
+    </div>
+    <div id="top-right">
+      <div id="score">0</div>
+      <div id="combo"></div>
+      <div id="killfeed"></div>
+    </div>
+    <div id="boss-bar"><div class="name">RESONATOR PRIME <span id="boss-phase"></span></div><div class="track"><div id="boss-ghost"></div><div id="boss-fill"></div></div></div>
+    <div id="echo-timeline"><span>ECHO REPLAY</span><div class="track"><div id="echo-timeline-fill"></div></div></div>
+    <div id="bottom-left">
+      <div class="bar-row"><label>HP</label><div class="bar hp"><div id="hp-ghost"></div><div id="hp-fill"></div></div><span id="hp-text">100</span></div>
+      <div class="bar-row" id="echo-box"><label>ECHO</label><div class="bar echo"><div id="echo-fill"></div></div><span id="echo-text">0%</span></div>
+      <div class="bar-row"><label>DASH</label><div id="dash-pips"></div></div>
+    </div>
+    <div id="bottom-right">
+      <div id="weapon-name">PULSE CARBINE</div>
+      <div id="ammo"><span id="ammo-mag">32</span><span class="sep">/</span><span id="ammo-reserve">∞</span></div>
+      <div id="weapon-slots"></div>
+    </div>
+    <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+    <div id="toast"></div>
+    <div id="lowhp">生命值过低</div>
+    <div id="lock-hint">点击画面锁定鼠标 · 未锁定时移动鼠标或 ← → 转向 · Esc 暂停</div>
+  </div>
+
+  <section id="screen-menu" class="screen show">
+    <div class="menu-wrap">
+      <div class="logo"><span class="p">PHASE</span><span class="e">ECHO</span></div>
+      <div class="tagline">相位残影 · 回溯三秒，让过去的你并肩作战</div>
+      <div class="diffs">
+        <button data-diff="normal">标准</button><button data-diff="hard">困难</button><button data-diff="nightmare">噩梦</button>
+      </div>
+      <button id="btn-start" class="primary">开始行动 <small>ENTER</small></button>
+      <div class="row"><button id="btn-howto">玩法说明</button><button id="btn-settings">设置</button></div>
+      <div id="menu-best"></div>
+      <div class="credits">原创作品 · Three.js 程序化建模 · WebAudio 程序化音效 · 无外部素材</div>
+    </div>
+  </section>
+
+  <section id="screen-howto" class="screen">
+    <div class="panel wide">
+      <h2>玩法说明</h2>
+      <div class="howto-grid">
+        <div>
+          <h3>操作</h3>
+          <ul class="keys">
+            <li><kbd>W A S D</kbd> 移动</li><li><kbd>鼠标</kbd> 瞄准 · <kbd>左键</kbd> 射击 · <kbd>右键</kbd> 精确瞄准</li>
+            <li><kbd>空格</kbd> 跳跃（可在落地前预输入）</li><li><kbd>Shift</kbd> 冲刺（2 次充能）</li>
+            <li><kbd>1 2 3</kbd> / <kbd>滚轮</kbd> 切换武器 · <kbd>R</kbd> 换弹</li><li><kbd>Q</kbd> 相位残影 · <kbd>Esc / P</kbd> 暂停</li>
+          </ul>
+          <h3>相位残影 PHASE ECHO</h3>
+          <p>造成伤害与击杀会充能相位能量。能量满后按 <kbd>Q</kbd>：你会被拉回 <b>3 秒前</b> 的位置，并恢复这 3 秒内损失生命的一半。与此同时，一个<b>残影</b>会原样重演你刚才 3 秒的走位与每一发射击（65% 伤害），吸引敌人火力，最后<b>坍缩</b>：把附近敌人吸向中心并引爆。</p>
+          <p>技巧：先冲进敌群开火，再回溯到安全位置——让过去的自己替你收尾。</p>
+        </div>
+        <div>
+          <h3>武器</h3>
+          <ul class="weapons">
+            <li style="--c:#22e6ff"><b>脉冲步枪</b> 全自动，无限备弹，中距离主力</li>
+            <li style="--c:#ff8a1f"><b>冰雹霰弹</b> 10 发弹丸固定散布，逐发装填，开火可打断换弹</li>
+            <li style="--c:#ff2bd6"><b>磁轨长矛</b> 高伤害，贯穿 5 个目标，可穿透壁垒护盾，开镜无散布</li>
+          </ul>
+          <h3>敌人</h3>
+          <ul class="enemies">
+            <li style="--c:#ff8a1f"><b>潜猎者</b> 快速近身，蓄力扑击前头部会闪烁</li>
+            <li style="--c:#b35cff"><b>哨卫</b> 保持距离，瞄准闪光后三连发</li>
+            <li style="--c:#7ff6ff"><b>游魂</b> 空中环绕，发射高速针刺</li>
+            <li style="--c:#ffc21f"><b>壁垒</b> 正面护盾（减伤 88%），背部红色散热口是弱点；远程迫击、近身震地波（跳起可躲）</li>
+            <li style="--c:#ff2bd6"><b>RESONATOR PRIME</b> 第十波首领：先击碎护盾板，瞄准核心之眼</li>
+          </ul>
+          <h3>其他</h3>
+          <p>绿色跳板可弹射到中央高台；四角橙色弹药站每 25 秒补充一次备弹；每波结束可三选一安装模块。</p>
+        </div>
+      </div>
+      <button id="btn-howto-back">返回</button>
+    </div>
+  </section>
+
+  <section id="screen-settings" class="screen">
+    <div class="panel">
+      <h2>设置</h2>
+      <label class="set">鼠标灵敏度 <input id="set-sens" type="range" min="0.2" max="3" step="0.05"><output id="set-sens-v"></output></label>
+      <label class="set">视野 FOV <input id="set-fov" type="range" min="70" max="110" step="1"><output id="set-fov-v"></output></label>
+      <label class="set">主音量 <input id="set-vol" type="range" min="0" max="1" step="0.05"><output id="set-vol-v"></output></label>
+      <label class="set">音乐音量 <input id="set-music" type="range" min="0" max="1" step="0.05"><output id="set-music-v"></output></label>
+      <label class="set">画质 <select id="set-quality"><option value="auto">自动（软件渲染时用低画质）</option><option value="high">高（阴影 + 泛光）</option><option value="medium">中</option><option value="low">低（无阴影、无泛光）</option></select></label>
+      <label class="set check"><input id="set-invert" type="checkbox"> 反转 Y 轴</label>
+      <label class="set check"><input id="set-toggleads" type="checkbox"> 右键切换瞄准（而非按住）</label>
+      <label class="set check"><input id="set-shake" type="checkbox"> 屏幕震动</label>
+      <label class="set check"><input id="set-dmgnum" type="checkbox"> 伤害数字</label>
+      <button id="btn-settings-back">返回</button>
+    </div>
+  </section>
+
+  <section id="screen-pause" class="screen">
+    <div class="panel">
+      <h2>已暂停</h2>
+      <button id="btn-resume" class="primary">继续</button>
+      <button id="btn-pause-settings">设置</button>
+      <button id="btn-restart">重新开始</button>
+      <button id="btn-quit">返回主菜单</button>
+      <p class="hint">点击“继续”后重新锁定鼠标</p>
+    </div>
+  </section>
+
+  <section id="screen-upgrade" class="screen">
+    <div class="panel upgrade">
+      <h2 id="upgrade-wave">选择模块</h2>
+      <div id="upgrade-cards"></div>
+      <p class="hint">点击卡片或按 1 / 2 / 3</p>
+    </div>
+  </section>
+
+  <section id="screen-results" class="screen">
+    <div class="panel results">
+      <h2 id="results-title">任务完成</h2>
+      <div id="results-sub"></div>
+      <div id="results-rank">S</div>
+      <div id="results-stats"></div>
+      <div id="results-upgrades"></div>
+      <div class="row"><button id="btn-again" class="primary">再来一局</button><button id="btn-menu">主菜单</button></div>
+    </div>
+  </section>
+
+  <div id="webgl-error">此浏览器无法创建 WebGL 上下文。请使用最新版 Chrome / Edge / Firefox，并确认已开启硬件加速。</div>
+  <noscript>需要启用 JavaScript。</noscript>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
