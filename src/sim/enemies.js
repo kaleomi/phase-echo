@@ -33,9 +33,20 @@ export const ENEMY_TYPES = Object.freeze({
     slam: { range: 5.2, windup: 0.85, recover: 1.0, radius: 9, speed: 11, damage: 26, cooldown: 2.5 },
     mortar: { windup: 0.6, flight: 1.35, radius: 3.2, damage: 22, cooldown: [4, 5.5], minRange: 9, maxRange: 32 },
   }),
+  // REWINDER: a hovering chrono-construct that mirrors the player's mechanic. It keeps its own last three
+  // seconds; every `cycle` seconds it snaps back to where it was three seconds ago and regains the HP it lost
+  // since. Its past self (the anchor) hangs in the air on a tether: shooting the anchor shatters it (no rewind,
+  // stagger + damage), and an echo collapse wipes it too. Otherwise: burst it down inside one window.
+  rewinder: Object.freeze({
+    cn: '逆时体', hp: 220, speed: 3.4, radius: 0.6, height: 1.2, score: 260, flying: true, energy: 12,
+    drop: { health: 0.25, ammo: 0.3, count: 1 },
+    shape: { body: { sphere: 0.62 }, weak: { r: 0.26 }, anchor: 0.6 },
+    bolt: { tell: 0.5, speed: 17, damage: 9, count: 2, cooldown: [2.2, 3.2], orbit: [10, 15], altitude: [2.4, 4.2], lead: 0.2 },
+    rewind: { window: 3, cycle: 5, tell: 0.75, minLag: 1.5, breakDamage: 35, breakStagger: 0.7 },
+  }),
 });
 
-export const LIGHT_TYPES = ['stalker', 'sentinel', 'wisp'];
+export const LIGHT_TYPES = ['stalker', 'sentinel', 'wisp', 'rewinder'];
 
 export function createEnemy(type, id, pos, diff, rng) {
   const def = ENEMY_TYPES[type];
@@ -47,12 +58,13 @@ export function createEnemy(type, id, pos, diff, rng) {
     vx: 0, vy: 0, vz: 0, lunge: null,
   };
   if (def.flying) {
-    const n = def.needle;
+    const n = def.needle || def.bolt;
     e.alt = rng.range(n.altitude[0], n.altitude[1]);
     e.y = pos.y ?? e.alt;
     e.orbitA = rng.range(0, Math.PI * 2);
     e.orbitDir = rng.chance(0.5) ? 1 : -1;
     e.orbitR = rng.range(n.orbit[0], n.orbit[1]);
+    if (def.rewind) { e.hist = []; e.histAt = -1; e.anchor = null; e.rewindT = def.rewind.cycle; e.rewindTold = false; }
   } else {
     e.body = createBody({ x: pos.x, y: pos.y ?? 0, z: pos.z }, { radius: def.radius, height: def.height, stepHeight: 0.45, usePads: false });
   }
@@ -220,6 +232,76 @@ function wisp(e, g, tgt, dt) {
   } else if (e.state !== 'fly' && e.state !== 'tell') e.state = 'fly';
 }
 
+function rewinder(e, g, tgt, dt) {
+  const B = e.def.bolt;
+  e.strafeT -= dt;
+  if (e.strafeT <= 0) {
+    e.strafeT = g.rng.range(2.5, 4.5);
+    if (g.rng.chance(0.4)) e.orbitDir *= -1;
+    e.orbitR = g.rng.range(B.orbit[0], B.orbit[1]);
+    e.alt = g.rng.range(B.altitude[0], B.altitude[1]);
+  }
+  e.orbitA += e.orbitDir * (e.def.speed / e.orbitR) * dt;
+  const want = { x: tgt.x + Math.cos(e.orbitA) * e.orbitR, y: tgt.y + e.alt + Math.sin(e.anim * 1.3) * 0.3, z: tgt.z + Math.sin(e.orbitA) * e.orbitR };
+  const dx = want.x - e.x, dy = want.y - e.y, dz = want.z - e.z, d = Math.hypot(dx, dy, dz);
+  const sp = Math.min(e.def.speed * 1.5, d * 1.8), k = d > 1e-3 ? sp / d : 0, a = 1 - Math.exp(-3 * dt);
+  e.vx += (dx * k - e.vx) * a; e.vy += (dy * k - e.vy) * a; e.vz += (dz * k - e.vz) * a;
+  flyMove(e, g, dt);
+  e.yaw = yawTowards(tgt.x - e.x, tgt.z - e.z);
+  e.cooldown -= dt;
+  const aim = { x: tgt.x, y: tgt.y + tgt.chest, z: tgt.z };
+  const see = lineOfSight(e, g, { x: e.x, y: e.y, z: e.z }, aim, dt);
+  if (e.state === 'fly' && e.cooldown <= 0 && see) {
+    e.state = 'tell'; e.t = B.tell; e.tell = Math.max(e.tell, B.tell);
+    g.emit('enemyTell', { id: e.id, enemy: e.type, kind: 'chrono', x: e.x, y: e.y, z: e.z });
+  } else if (e.state === 'tell') {
+    e.t -= dt;
+    if (e.t <= 0) {
+      for (let i = 0; i < B.count; i++) g.fire(e, 'chrono', { x: e.x, y: e.y, z: e.z }, tgt, { speed: B.speed, damage: B.damage * g.diff.damage, lead: B.lead, spread: 0.035, r: 0.22 });
+      e.state = 'fly'; e.cooldown = g.rng.range(B.cooldown[0], B.cooldown[1]);
+    }
+  } else if (e.state !== 'fly' && e.state !== 'tell') e.state = 'fly';
+}
+
+// The rewinder's own timeline: 10 Hz history of position + HP, the anchor (oldest sample once it is old enough)
+// and the periodic snap back. Runs even while staggered: only breaking the anchor (or an echo collapse) stops it.
+function stepRewind(e, g, dt) {
+  const R = e.def.rewind, now = g.time;
+  if (now - e.histAt >= 0.1) { e.hist.push({ t: now, x: e.x, y: e.y, z: e.z, hp: e.hp }); e.histAt = now; }
+  while (e.hist.length > 1 && e.hist[1].t <= now - R.window) e.hist.shift();
+  const a = e.hist[0];
+  e.anchor = a && now - a.t >= R.minLag ? { x: a.x, y: a.y, z: a.z, hp: a.hp } : null;
+  e.rewindT -= dt;
+  if (e.rewindT <= R.tell && !e.rewindTold && e.anchor) {
+    e.rewindTold = true;
+    e.tell = Math.max(e.tell, R.tell);
+    g.emit('enemyTell', { id: e.id, enemy: e.type, kind: 'rewind', x: e.x, y: e.y, z: e.z });
+  }
+  if (e.rewindT > 0) return;
+  e.rewindT = R.cycle; e.rewindTold = false;
+  if (!e.anchor) return;
+  const from = { x: e.x, y: e.y, z: e.z }, to = e.anchor, healed = Math.max(0, to.hp - e.hp);
+  e.x = to.x; e.y = to.y; e.z = to.z; e.vx = e.vy = e.vz = 0;
+  e.hp = Math.max(e.hp, to.hp);
+  e.hist = []; e.histAt = -1; e.anchor = null;
+  g.emit('rewind', { id: e.id, from, to: { x: to.x, y: to.y, z: to.z }, healed });
+}
+
+// Shattering the anchor (shot or echo collapse): no rewind this cycle, history restarts from now.
+export function breakAnchor(e, g, cause = 'shot') {
+  if (!e.def.rewind || !e.anchor) return false;
+  const at = e.anchor;
+  e.hist = []; e.histAt = -1; e.anchor = null; e.rewindT = e.def.rewind.cycle; e.rewindTold = false; e.tell = 0;
+  if (cause === 'shot') e.stagger = e.def.rewind.breakStagger;
+  g.emit('anchorBreak', { id: e.id, x: at.x, y: at.y, z: at.z, cause });
+  return true;
+}
+
+// The anchor is only a separate target once it hangs clear of the body (otherwise it is hidden inside it).
+export function anchorExposed(e) {
+  return !!(e.anchor && e.alive && Math.hypot(e.anchor.x - e.x, e.anchor.y - e.y, e.anchor.z - e.z) > 1.3);
+}
+
 // Kinematic flight with box push-out; used by wisps and by implosion pulls on flyers.
 function flyMove(e, g, dt) {
   e.x += e.vx * dt; e.y += e.vy * dt; e.z += e.vz * dt;
@@ -284,8 +366,8 @@ function bulwark(e, g, tgt, dt) {
   }
 }
 
-const INITIAL = { stalker: 'chase', sentinel: 'move', wisp: 'fly', bulwark: 'advance' };
-const THINK = { stalker, sentinel, wisp, bulwark };
+const INITIAL = { stalker: 'chase', sentinel: 'move', wisp: 'fly', bulwark: 'advance', rewinder: 'fly' };
+const THINK = { stalker, sentinel, wisp, bulwark, rewinder };
 
 export function updateEnemy(e, g, dt) {
   e.anim += dt;
@@ -297,7 +379,8 @@ export function updateEnemy(e, g, dt) {
     return;
   }
   if (e.pull) {
-    // Echo implosion: dragged toward the collapse point, no AI.
+    // Echo implosion: dragged toward the collapse point, no AI. The collapse also erases a rewinder's anchor.
+    if (e.anchor) breakAnchor(e, g, 'echo');
     e.pull.t -= dt;
     const px = e.pull.x - e.x, pz = e.pull.z - e.z, d = Math.hypot(px, pz), sp = d > 0.6 ? Math.min(14, 4 + d * 2.2) : 0;
     if (e.body) {
@@ -312,6 +395,7 @@ export function updateEnemy(e, g, dt) {
     if (e.pull.t <= 0) e.pull = null;
     return;
   }
+  if (e.def.rewind) stepRewind(e, g, dt);
   if (e.stagger > 0) {
     e.stagger -= dt;
     e.tell = 0;

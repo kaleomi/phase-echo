@@ -6,7 +6,7 @@ import { ECHO } from '../sim/echo.js';
 import { WAVE_COUNT } from '../sim/waves.js';
 
 const $ = id => document.getElementById(id);
-const NAMES = { stalker: '潜猎者', sentinel: '哨卫', wisp: '游魂', bulwark: '壁垒', boss: 'RESONATOR PRIME' };
+const NAMES = { stalker: '潜猎者', sentinel: '哨卫', wisp: '游魂', bulwark: '壁垒', rewinder: '逆时体', boss: 'RESONATOR PRIME' };
 
 export function createHud(camera) {
   const el = {
@@ -153,11 +153,11 @@ export function createHud(camera) {
       hitT = kill ? 0.3 : 0.18;
       el.hit.className = kill ? 'kill' : weak ? 'weak' : blocked ? 'blocked' : '';
     },
-    damageNumber(pos, amount, weak, echo) {
+    damageNumber(pos, amount, weak, echo, heal = false) {
       if (numbers.length > 40) { numbers[0].el.remove(); numbers.shift(); }
       const d = document.createElement('div');
-      d.className = `dmg${weak ? ' weak' : ''}${echo ? ' echo' : ''}`;
-      d.textContent = Math.round(amount);
+      d.className = `dmg${weak ? ' weak' : ''}${echo ? ' echo' : ''}${heal ? ' heal' : ''}`;
+      d.textContent = heal ? `+${Math.round(amount)}` : Math.round(amount);
       el.dmgLayer.appendChild(d);
       numbers.push({ el: d, pos: pos.clone().add({ x: (Math.random() - 0.5) * 0.4, y: 0.2, z: (Math.random() - 0.5) * 0.4 }), t: 0.9 });
     },

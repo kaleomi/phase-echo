@@ -205,6 +205,7 @@ export function createProjectileViews(scene) {
     needle: { color: 0x7ff6ff, size: 0.4, trail: 1.6 },
     orb: { color: 0xff4fe0, size: 0.95, trail: 0 },
     shell: { color: 0xffb21f, size: 0.7, trail: 0.6 },
+    chrono: { color: 0xd9b8ff, size: 0.8, trail: 0.9 },
   };
   const trailGeo = new THREE.CylinderGeometry(0.5, 0, 1, 6, 1, true);
   trailGeo.translate(0, -0.5, 0);

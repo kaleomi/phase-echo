@@ -174,8 +174,44 @@ function bulwark() {
   return { root, body, parts: { legs, torso, shieldArm, mortar, vent: ventMesh, visor: eye }, mats: [shell, dark, accent, vent, shieldMat], accent, height: 2.6 };
 }
 
+// Rewinder: an hourglass of two cones inside a gimballed ring, a white time-core at the waist (weak point, front)
+// and a gold clock ring. Its anchor (the ghost of where it was three seconds ago) is a wireframe copy on a tether;
+// the renderer places it in world space every frame. Anchor materials are kept out of `mats` (no hit flash).
+function rewinder() {
+  const root = new THREE.Group(), body = new THREE.Group();
+  root.add(body);
+  const shell = std(0x2a2040, 0x2a1440, 0.4, { metalness: 0.8, roughness: 0.35 }), lilac = glow(0xd9b8ff, 1.5), gold = glow(0xffd27a, 1.5), core = glow(0xf4ecff, 2.6);
+  const glass = new THREE.Group();
+  body.add(glass);
+  const top = mesh(G('ConeGeometry', 0.42, 0.6, 6, 1, true), shell, 0, 0.3, 0, glass); top.rotation.x = Math.PI;
+  mesh(G('ConeGeometry', 0.42, 0.6, 6, 1, true), shell, 0, -0.3, 0, glass);
+  mesh(G('CylinderGeometry', 0.44, 0.44, 0.05, 6), lilac, 0, 0.6, 0, glass);
+  mesh(G('CylinderGeometry', 0.44, 0.44, 0.05, 6), lilac, 0, -0.6, 0, glass);
+  const sandTop = mesh(G('ConeGeometry', 0.26, 0.34, 6), lilac, 0, 0.2, 0, glass); sandTop.rotation.x = Math.PI;
+  const sandBottom = mesh(G('ConeGeometry', 0.26, 0.34, 6), lilac, 0, -0.42, 0, glass);
+  const heart = mesh(G('IcosahedronGeometry', 0.17, 1), core, 0, 0, -0.06, body);
+  const frame = mesh(G('TorusGeometry', 0.68, 0.035, 6, 36), lilac, 0, 0, 0, body);
+  const clock = mesh(G('TorusGeometry', 0.86, 0.022, 6, 48), gold, 0, 0, 0, body); clock.rotation.x = Math.PI / 2;
+  const hands = new THREE.Group();
+  body.add(hands);
+  mesh(G('BoxGeometry', 0.03, 0.5, 0.03), gold, 0, 0.25, -0.02, hands);
+  mesh(G('BoxGeometry', 0.03, 0.34, 0.03), gold, 0, 0.17, -0.02, hands).rotation.z = 1.2;
+  hands.position.z = -0.46;
+  // Anchor ghost + tether (local to root; the renderer sets their transforms).
+  const ghostMat = new THREE.MeshBasicMaterial({ color: 0xd9b8ff, wireframe: true, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const anchor = new THREE.Group();
+  const gTop = new THREE.Mesh(G('ConeGeometry', 0.42, 0.6, 6, 1, true), ghostMat); gTop.position.y = 0.3; gTop.rotation.x = Math.PI; anchor.add(gTop);
+  const gBot = new THREE.Mesh(G('ConeGeometry', 0.42, 0.6, 6, 1, true), ghostMat); gBot.position.y = -0.3; anchor.add(gBot);
+  const gRing = new THREE.Mesh(G('TorusGeometry', 0.68, 0.03, 4, 24), ghostMat); anchor.add(gRing);
+  const tetherMat = new THREE.MeshBasicMaterial({ color: 0xd9b8ff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const tether = new THREE.Mesh(G('CylinderGeometry', 0.025, 0.025, 1, 5, 1, true), tetherMat);
+  anchor.visible = false; tether.visible = false;
+  root.add(anchor, tether);
+  return { root, body, parts: { glass, frame, clock, hands, heart, sandTop, sandBottom, anchor, gRing, tether }, mats: [shell, lilac, gold, core], accent: lilac, height: 1.2, ghostMat, tetherMat };
+}
+
 export function createEnemyModel(type) {
-  const m = ({ stalker, sentinel, wisp, bulwark })[type]();
+  const m = ({ stalker, sentinel, wisp, bulwark, rewinder })[type]();
   m.type = type;
   m.root.name = `enemy-${type}`;
   m.baseEmissive = m.mats.map(mt => mt.emissiveIntensity);

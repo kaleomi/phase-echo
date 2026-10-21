@@ -14,7 +14,8 @@ import { platePositions, BOSS } from '../sim/boss.js';
 import { ECHO } from '../sim/echo.js';
 
 const WEAPON_COLORS = { carbine: 0x22e6ff, scatter: 0xff9a3c, rail: 0xff2bd6 };
-const ENEMY_COLORS = { stalker: 0xff8a1f, sentinel: 0xb35cff, wisp: 0x7ff6ff, bulwark: 0xffc21f, boss: 0xff2bd6 };
+const ENEMY_COLORS = { stalker: 0xff8a1f, sentinel: 0xb35cff, wisp: 0x7ff6ff, bulwark: 0xffc21f, rewinder: 0xd9b8ff, boss: 0xff2bd6 };
+const UP = new THREE.Vector3(0, 1, 0);
 
 export function createRenderer(canvas, settings) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
@@ -103,7 +104,7 @@ export function createRenderer(canvas, settings) {
   function warmUp() {
     warmed = true;
     const tmp = new THREE.Group();
-    for (const t of ['stalker', 'sentinel', 'wisp', 'bulwark']) tmp.add(createEnemyModel(t).root);
+    for (const t of ['stalker', 'sentinel', 'wisp', 'bulwark', 'rewinder']) { const m = createEnemyModel(t); if (m.parts.anchor) m.parts.anchor.visible = m.parts.tether.visible = true; tmp.add(m.root); }
     tmp.add(createBossModel().root, createEchoModel().root, createPickupModel('health').root, createPickupModel('ammo').root);
     tmp.position.set(0, -50, 0);
     scene.add(tmp);
@@ -198,6 +199,30 @@ export function createRenderer(canvas, settings) {
       else { p.shieldArm.position.y += (-0.05 - p.shieldArm.position.y) * 0.2; p.shieldArm.rotation.x *= 0.8; }
       p.mortar.rotation.x = e.state === 'mortar' ? -0.4 : 0;
       p.vent.material.emissiveIntensity = 3 + Math.sin(time * 6) * 1.5;
+    } else if (e.type === 'rewinder') {
+      const rewinding = !!e.rewindTold;
+      p.frame.rotation.y += 0.02 + (rewinding ? 0.25 : 0);
+      p.clock.rotation.z -= 0.012;
+      p.hands.rotation.z = rewinding ? p.hands.rotation.z + 0.5 : -time * 1.4; // clock hands spin backwards before a rewind
+      p.glass.rotation.z += ((rewinding ? Math.PI : 0) - p.glass.rotation.z) * 0.12; // hourglass flips
+      p.heart.scale.setScalar(e.state === 'tell' ? 1.4 + Math.sin(time * 40) * 0.25 : 1);
+      v.body.position.y = Math.sin(w) * 0.08;
+      // Anchor ghost + tether: placed in the root's local space at the world position of the anchor.
+      const a = e.anchor, show = !!a && Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) > 1.3;
+      p.anchor.visible = p.tether.visible = show;
+      if (show) {
+        v.root.updateMatrixWorld();
+        const local = v.root.worldToLocal(tmpV.set(a.x, a.y, a.z)), len = local.length();
+        p.anchor.position.copy(local);
+        p.anchor.rotation.y = time * 0.8;
+        p.gRing.rotation.x = time * 1.3;
+        p.tether.position.copy(local).multiplyScalar(0.5);
+        p.tether.quaternion.setFromUnitVectors(UP, tmpV2.copy(local).divideScalar(len));
+        p.tether.scale.set(1, len, 1);
+        const pulse = rewinding ? 0.5 + 0.5 * Math.sin(time * 30) : 0;
+        v.ghostMat.opacity = 0.3 + pulse * 0.55;
+        v.tetherMat.opacity = 0.2 + pulse * 0.6;
+      }
     }
   }
 
@@ -398,11 +423,30 @@ export function createRenderer(canvas, settings) {
           break;
         }
         case 'explosion': fx.explosion(vec(ev), ev.kind === 'mortar' ? 0xffb21f : 0xff6a3a, ev.r); audio.play('explode', ev); addShake(0.35 / Math.max(1, Math.hypot(ev.x - pb.x, ev.z - pb.z) / 6)); break;
-        case 'enemyTell': audio.play(ev.kind === 'slam' || ev.kind === 'mortar' ? 'heavyTell' : ev.kind === 'lunge' ? 'lungeTell' : 'tell', ev, 60); break;
+        case 'enemyTell': audio.play(ev.kind === 'slam' || ev.kind === 'mortar' ? 'heavyTell' : ev.kind === 'lunge' ? 'lungeTell' : ev.kind === 'rewind' ? 'rewind' : 'tell', ev, 60); break;
+        case 'rewind': {
+          const from = vec(ev.from), to = vec(ev.to);
+          audio.play('phase', ev.to, 60);
+          fx.tracer(from, to, 0xd9b8ff, 0.04, 0.35, 0.8);
+          for (let k = 0; k < 8; k++) fx.sparks(from.clone().lerp(to, k / 8), 0xd9b8ff, 2, 1.2, 0.45, 0);
+          fx.flash(to, 0xd9b8ff, 2.2, 0.25);
+          fx.ring(to, 0xd9b8ff, 0.3, 1.8, 0.35, false);
+          if (ev.healed > 0.5 && settings.damageNumbers) hud.damageNumber(to, ev.healed, false, false, true);
+          break;
+        }
+        case 'anchorBreak': {
+          const p = vec(ev);
+          fx.explosion(p, 0xd9b8ff, 1.1);
+          fx.sparks(p, 0xffffff, 16, 6, 0.4, 4);
+          audio.play('shielded', ev, 40);
+          audio.play('small', ev, 40);
+          if (ev.cause === 'shot') hud.toast('时间锚点已击碎 — 逆时体无法回溯', 1, 'cyan');
+          break;
+        }
         case 'enemyAttack': if (ev.kind === 'slam') { audio.play('slam', ev); addShake(0.4); fx.explosion(vec(ev, 0.2), 0xffc21f, 2); } else if (ev.kind === 'mortar') audio.play('mortarLaunch', ev); break;
-        case 'enemyFire': audio.play(ev.kind === 'needle' ? 'needle' : 'enemyBolt', ev, 25); fx.flash(vec(ev), ev.kind === 'needle' ? 0x7ff6ff : 0xc07bff, 0.6, 0.08); break;
+        case 'enemyFire': audio.play(ev.kind === 'needle' ? 'needle' : ev.kind === 'chrono' ? 'echoShot' : 'enemyBolt', ev, 25); fx.flash(vec(ev), ev.kind === 'needle' ? 0x7ff6ff : ev.kind === 'chrono' ? 0xd9b8ff : 0xc07bff, 0.6, 0.08); break;
         case 'mortar': fx.marker(vec(ev), ev.r, 0xffb21f, ev.time); break;
-        case 'projectileHit': fx.sparks(vec(ev), ev.kind === 'orb' ? 0xff4fe0 : ev.kind === 'needle' ? 0x7ff6ff : 0xc07bff, 6, 4, 0.3, 6, ev.normal); if (ev.target === 'phase') audio.play('phase', null, 60); break;
+        case 'projectileHit': fx.sparks(vec(ev), ev.kind === 'orb' ? 0xff4fe0 : ev.kind === 'needle' ? 0x7ff6ff : ev.kind === 'chrono' ? 0xd9b8ff : 0xc07bff, 6, 4, 0.3, 6, ev.normal); if (ev.target === 'phase') audio.play('phase', null, 60); break;
         case 'playerHurt': {
           const ang = Math.atan2(-(ev.fromX - pb.x), -(ev.fromZ - pb.z));
           hud.damageIndicator(ang - game.player.yaw, ev.amount);

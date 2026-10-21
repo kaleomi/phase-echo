@@ -11,7 +11,7 @@ import { WEAPONS, createArsenal, updateArsenal, refreshArsenal, falloff, addAmmo
 import { baseStats, rollOffers, applyUpgrade } from './upgrades.js';
 import { createScore, addKill, stepScore, waveBonus, accuracy, rankFor } from './scoring.js';
 import { DIFFICULTY, WAVE_COUNT, isBossWave, buildSpawnQueue, maxAlive, spawnInterval, waveParTime, INTERMISSION, FIRST_DELAY, GATE_WARNING } from './waves.js';
-import { ENEMY_TYPES, createEnemy, updateEnemy, weakCenter, forwardOf, isStaggerable } from './enemies.js';
+import { ENEMY_TYPES, createEnemy, updateEnemy, weakCenter, forwardOf, isStaggerable, breakAnchor, anchorExposed } from './enemies.js';
 import { BOSS, createBoss, stepBoss, damageBoss, platePositions } from './boss.js';
 import { ECHO, createRecorder, beginEcho, advanceEcho } from './echo.js';
 
@@ -227,12 +227,29 @@ export function createGame(opts = {}) {
         if (!e.alive || e.spawnT > 0) continue;
         const h = hitEnemy(origin, d, e, maxT);
         if (h) hits.push(h);
+        // A rewinder's anchor (its past self) is a separate target once it has drifted clear of the body.
+        if (anchorExposed(e)) {
+          const ta = raySphere(origin, d, e.anchor, e.def.shape.anchor, maxT);
+          if (ta !== null) hits.push({ t: ta, anchor: true, target: e });
+        }
       }
       if (g.boss && g.boss.alive && g.boss.state !== 'intro') hits.push(...hitBoss(origin, d, maxT));
       hits.sort((a, b) => a.t - b.t);
       let pierce = weapon.pierce, endT = maxT, kind = wall ? 'wall' : 'none', normal = wall ? wall.normal : null;
       for (const h of hits) {
         if (h.plate) { endT = h.t; kind = 'plate'; normal = null; emit('plateHit', { x: origin.x + d.x * h.t, y: origin.y + d.y * h.t, z: origin.z + d.z * h.t }); break; }
+        if (h.anchor) {
+          endT = h.t; kind = 'anchor'; normal = null;
+          const e = h.target;
+          if (e.anchor && breakAnchor(e, facade, 'shot')) {
+            const acc = perTarget.get(e) || { dmg: 0, weak: false, shielded: false, point: null };
+            acc.dmg += e.def.rewind.breakDamage * stats.damageMult;
+            if (!acc.point) acc.point = { x: e.x, y: e.y, z: e.z };
+            perTarget.set(e, acc);
+            anyHit = true;
+          }
+          break;
+        }
         let dmg = weapon.damage * falloff(weapon, h.t) * mult;
         if (h.weak) dmg *= h.target === g.boss ? BOSS.eyeMult + stats.weakBonus * 0.5 : weapon.weakMult + stats.weakBonus;
         if (h.shielded) dmg *= weapon.id === 'rail' ? h.target.def.shield.railFactor : h.target.def.shield.factor;
@@ -276,7 +293,7 @@ export function createGame(opts = {}) {
     gainEnergy(dealt * ENERGY_PER_DAMAGE);
     if (isStaggerable(e) && acc.dmg >= e.maxHp * 0.4 && e.hp > 0) {
       e.stagger = 0.32;
-      if (e.state !== 'spawn') e.state = { stalker: 'chase', sentinel: 'move', wisp: 'fly' }[e.type];
+      if (e.state !== 'spawn') e.state = { stalker: 'chase', sentinel: 'move', wisp: 'fly', rewinder: 'fly' }[e.type];
     }
     emit('hit', { id: e.id, enemy: e.type, damage: acc.dmg, weak: acc.weak, shielded: acc.shielded, kill: e.hp <= 0, ...acc.point, echo: fromEcho });
     if (e.hp <= 0) killEnemy(e, acc.weak, fromEcho, cause);

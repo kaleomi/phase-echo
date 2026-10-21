@@ -5,16 +5,17 @@ export const DIFFICULTY = Object.freeze({
   nightmare: Object.freeze({ id: 'nightmare', cn: '噩梦', hp: 1.5, damage: 1.65, count: 1.4, spawnRate: 1.3, bossHp: 1.6, score: 2.2 }),
 });
 
+// Rewinders (time-anchored flyers) arrive from wave 4 and take a couple of wisp slots in the later waves.
 export const WAVES = Object.freeze([
   { stalker: 4, wisp: 2 },
   { stalker: 6, wisp: 3 },
   { stalker: 4, sentinel: 3, wisp: 2 },
-  { stalker: 6, sentinel: 3, wisp: 4 },
+  { stalker: 6, sentinel: 3, wisp: 3, rewinder: 1 },
   { bulwark: 1, stalker: 5, wisp: 3 },
-  { stalker: 8, sentinel: 4, wisp: 4 },
-  { bulwark: 2, stalker: 6, sentinel: 3, wisp: 3 },
-  { stalker: 10, sentinel: 5, wisp: 5 },
-  { bulwark: 3, stalker: 6, sentinel: 5, wisp: 5 },
+  { stalker: 8, sentinel: 4, wisp: 3, rewinder: 1 },
+  { bulwark: 2, stalker: 6, sentinel: 3, wisp: 2, rewinder: 1 },
+  { stalker: 10, sentinel: 5, wisp: 3, rewinder: 2 },
+  { bulwark: 3, stalker: 6, sentinel: 4, wisp: 4, rewinder: 2 },
   { boss: 1 },
 ].map(w => Object.freeze(w)));
 
