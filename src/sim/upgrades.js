@@ -3,7 +3,7 @@ export function baseStats() {
   return {
     damageMult: 1, reloadMult: 1, swapMult: 1, magMult: 1, reserveMult: 1, maxHp: 100, siphon: 0,
     dashCharges: 2, dashRechargeMult: 1, phaseGain: 1, implodeMult: 1, implodeRadius: 0, weakBonus: 0,
-    chain: 0, dropMult: 1, magnet: 3.2, speedMult: 1,
+    chain: 0, dropMult: 1, magnet: 3.2, speedMult: 1, echoWindow: 3, echoSiphon: 0, swapSurge: 0,
   };
 }
 
@@ -20,6 +20,10 @@ export const UPGRADES = Object.freeze([
   { id: 'chain', icon: '⚡', cn: '连锁反应', en: 'CHAIN REACTION', desc: '被你击杀的敌人会爆炸，对 3.5 米内敌人造成 35 伤害', max: 1, apply: s => { s.chain = 35; } },
   { id: 'scavenger', icon: '⊕', cn: '拾荒协议', en: 'SCAVENGER', desc: '掉落概率 +50%，拾取吸附范围翻倍', max: 1, apply: s => { s.dropMult *= 1.5; s.magnet *= 2; } },
   { id: 'fleet', icon: '➶', cn: '疾风步', en: 'FLEET FOOT', desc: '移动速度 +10%', max: 2, apply: s => { s.speedMult += 0.1; } },
+  // Echo mods: change how the echo behaves rather than adding raw stats.
+  { id: 'longecho', icon: '⧖', cn: '延时残影', en: 'LONG ECHO', desc: '回溯窗口 3 → 4 秒：残影重演更久，坍缩伤害 +20%', max: 1, echo: true, apply: s => { s.echoWindow = 4; s.implodeMult += 0.2; } },
+  { id: 'echosiphon', icon: '⟁', cn: '相位虹吸', en: 'ECHO SIPHON', desc: '残影每承受一次攻击，为你充能 6 点相位能量', max: 1, echo: true, apply: s => { s.echoSiphon = 6; } },
+  { id: 'swapsurge', icon: '⇄', cn: '换位冲击', en: 'SWAP SURGE', desc: '相位换位后 2.5 秒内伤害 +40%，并立即补满冲刺', max: 1, echo: true, apply: s => { s.swapSurge = 0.4; } },
 ].map(u => Object.freeze(u)));
 
 export const getUpgrade = id => UPGRADES.find(u => u.id === id) || null;

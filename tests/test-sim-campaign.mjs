@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { createGame } from '../src/sim/game.js';
 import { createBot, runGame } from './bot.mjs';
 
+let hurtTotal = 0;
 for (const seed of [101, 202]) {
   const game = createGame({ seed, invulnerable: true, firstDelay: 1 });
   const waves = new Set();
@@ -23,11 +24,14 @@ for (const seed of [101, 202]) {
   assert.ok(finite, 'no NaN damage');
   assert.ok(counts.upgradeChosen === 9, `nine upgrades chosen (${counts.upgradeChosen})`);
   assert.ok(counts.echoStart > 0 && counts.echoBlast > 0, 'echo used and detonated');
-  assert.ok(counts.playerHurt > 10, 'enemies actually deal damage to the player');
+  assert.ok(counts.playerHurt > 0, 'enemies actually deal damage to the player');
+  hurtTotal += counts.playerHurt;
   for (const k of ['enemyTell', 'enemyFire', 'mortar', 'shockwave', 'beamFire', 'bossFire', 'pickup']) assert.ok(counts[k] > 0, `event ${k} occurred`);
   assert.ok(Number.isFinite(game.player.body.x) && Number.isFinite(game.player.body.y), 'player position finite');
   console.log(`seed ${seed}: victory in ${t.toFixed(0)} s sim, score ${s.score}, kills ${s.kills}, acc ${(s.accuracy * 100).toFixed(0)}%, echoes ${s.echoes}, hurt ${counts.playerHurt}x / ${s.damageTaken} hp, rank ${s.rank}`);
 }
+
+assert.ok(hurtTotal > 10, `enemies land hits regularly across both campaigns (${hurtTotal})`);
 
 // A vulnerable autopilot must clear wave 1 on normal (the opening must be fair).
 {

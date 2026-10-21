@@ -46,9 +46,9 @@ export function createGame(opts = {}) {
   const g = {
     seed, diff, rng, layout, world, stats, owned: {}, time: 0, mode: 'intermission', modeT: opts.firstDelay ?? FIRST_DELAY, wave: (opts.startWave ?? 1) - 1,
     player, arsenal: createArsenal(stats), enemies: [], boss: null, projectiles: [], beams: [], shockwaves: [], pickups: [], stations,
-    pending: [], echo: null, recorder: createRecorder(), score: createScore(), offers: null, events: [], nextId: 1, slowT: 0,
+    pending: [], echo: null, recorder: createRecorder(), score: createScore(), offers: null, events: [], nextId: 1, slowT: 0, surgeT: 0,
     spawnQueue: [], spawnT: 0, waveTime: 0, waveHurt: false, waveQueueLength: 0, lastGate: -1, contactCd: 0,
-    record: { shots: 0, hits: 0, kills: 0, weakKills: 0, echoes: 0, echoKills: 0, damageTaken: 0, damageDealt: 0 },
+    record: { shots: 0, hits: 0, kills: 0, weakKills: 0, echoes: 0, echoKills: 0, damageTaken: 0, damageDealt: 0, swaps: 0, paradoxKills: 0 },
     debug: { invulnerable: !!opts.invulnerable },
   };
   const emit = (type, data = {}) => { g.events.push({ ...data, type, t: g.time }); }; // payload can never overwrite the event name
@@ -81,7 +81,7 @@ export function createGame(opts = {}) {
     flowFor: e => flows[e.type === 'bulwark' ? 'large' : 'small'][e.target === 'echo' && echoLive() ? 'echo' : 'player'],
     walkable: (e, ax, az, bx, bz, level) => (e.type === 'bulwark' ? navLarge : navSmall).straightWalkable(ax, az, bx, bz, level),
     hurt(target, amount, source, kind) {
-      if (target === 'echo' && echoLive()) { g.echo.hitFlash = 0.15; emit('echoHit', { kind }); return; }
+      if (target === 'echo' && echoLive()) { echoHit(kind); return; }
       hurtPlayer(amount, source, kind);
     },
     fire(e, kind, from, tgt, o) {
@@ -110,10 +110,11 @@ export function createGame(opts = {}) {
       const o = { x: boss.x + dir.x * (BOSS.coreR + 0.2), y: boss.y + dir.y * (BOSS.coreR + 0.2), z: boss.z + dir.z * (BOSS.coreR + 0.2) };
       g.projectiles.push({ id: nextId(), kind: 'orb', ...o, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed, r: 0.34, damage: 12 * diff.damage, life: 6, owner: boss.id });
     },
+    // Lances lock onto the echo half of the time while it is replaying, so the decoy also works on the boss.
     beam(boss, tell) {
-      const b = player.body;
-      g.beams.push({ id: nextId(), t: tell, tell, aim: { x: b.x, y: b.y + 1.1, z: b.z }, from: { ...boss.eye }, fired: false, life: 0.3, end: null });
-      emit('beamTell', { time: tell });
+      const target = echoLive() && rng.next() < 0.5 ? 'echo' : 'player', tp = targetPoint(target);
+      g.beams.push({ id: nextId(), t: tell, tell, target, aim: { x: tp.x, y: tp.y + 1.1, z: tp.z }, from: { ...boss.eye }, fired: false, life: 0.3, end: null });
+      emit('beamTell', { time: tell, target });
     },
     shockwave: facade.shockwave,
     summon(types) {
@@ -132,11 +133,19 @@ export function createGame(opts = {}) {
   };
 
   // ---------------------------------------------------------------- damage
-  function gainEnergy(amount) {
+  function gainEnergy(amount, scaled = true) {
     if (!(amount > 0)) return;
     const before = player.energy;
-    player.energy = Math.min(ECHO.cost, player.energy + amount * stats.phaseGain);
+    player.energy = Math.min(ECHO.cost, player.energy + amount * (scaled ? stats.phaseGain : 1));
     if (before < ECHO.cost && player.energy >= ECHO.cost && !g.echo) emit('echoReady', {});
+  }
+
+  // The echo absorbed an attack (it has no HP). With ECHO SIPHON every absorbed attack charges the player.
+  function echoHit(kind) {
+    if (!echoLive()) return;
+    g.echo.hitFlash = 0.15;
+    emit('echoHit', { kind, x: g.echo.pose.x, y: g.echo.pose.y + 1, z: g.echo.pose.z });
+    if (stats.echoSiphon > 0) gainEnergy(stats.echoSiphon, false);
   }
 
   function hurtPlayer(amount, source, kind = 'hit') {
@@ -208,7 +217,7 @@ export function createGame(opts = {}) {
   function fireShot(origin, dirs, weapon, fromEcho) {
     const ends = [], perTarget = new Map();
     let anyHit = false;
-    const mult = stats.damageMult * (fromEcho ? ECHO.damage : 1);
+    const mult = stats.damageMult * (fromEcho ? ECHO.damage : g.surgeT > 0 ? 1 + stats.swapSurge : 1);
     for (const d0 of dirs) {
       const d = fromEcho ? assist(origin, d0) : d0;
       const wall = firstBoxHit(origin, d, layout.rayBoxes, weapon.range);
@@ -259,6 +268,7 @@ export function createGame(opts = {}) {
     }
     const e = target;
     if (!e.alive) return;
+    if (fromEcho) e.echoHitT = g.time; else e.playerHitT = g.time; // paradox kill bookkeeping
     const dealt = Math.min(e.hp, acc.dmg);
     e.hp -= acc.dmg;
     e.flash = 0.09;
@@ -276,13 +286,16 @@ export function createGame(opts = {}) {
     if (!e.alive) return;
     e.alive = false;
     e.hp = 0;
-    const points = addKill(g.score, e.def.score, { weak, diffScore: diff.score });
+    // PARADOX: you and your echo both damaged it within the last second.
+    const paradox = g.time - (e.playerHitT ?? -99) <= ECHO.paradoxWindow && g.time - (e.echoHitT ?? -99) <= ECHO.paradoxWindow;
+    const points = addKill(g.score, e.def.score, { weak, diffScore: diff.score, bonus: paradox ? ECHO.paradoxBonus : 1 });
     g.record.kills += 1;
     if (weak) g.record.weakKills += 1;
     if (fromEcho) g.record.echoKills += 1;
     gainEnergy(e.def.energy * (fromEcho ? ECHO.killEnergy : 1));
+    if (paradox) { g.record.paradoxKills += 1; gainEnergy(ECHO.paradoxEnergy, false); }
     if (stats.siphon && player.alive) player.hp = Math.min(stats.maxHp, player.hp + stats.siphon);
-    emit('kill', { id: e.id, enemy: e.type, x: e.x, y: e.y, z: e.z, weak, points, echo: fromEcho, combo: g.score.combo });
+    emit('kill', { id: e.id, enemy: e.type, x: e.x, y: e.y, z: e.z, weak, points, echo: fromEcho, paradox, combo: g.score.combo });
     dropLoot(e);
     if (stats.chain > 0 && cause !== 'chain') {
       const cy = e.y + (e.def.flying ? 0 : e.def.height * 0.5);
@@ -306,8 +319,9 @@ export function createGame(opts = {}) {
 
   // ---------------------------------------------------------------- echo
   function triggerEcho() {
-    if (g.echo || !player.alive || player.energy < ECHO.cost - 1e-6) { emit('echoDenied', { energy: player.energy }); return false; }
-    const echo = beginEcho(g.recorder, g.time);
+    if (g.echo) return phaseSwap();
+    if (!player.alive || player.energy < ECHO.cost - 1e-6) { emit('echoDenied', { energy: player.energy }); return false; }
+    const echo = beginEcho(g.recorder, g.time, stats.echoWindow);
     if (!echo) { emit('echoDenied', { energy: player.energy, reason: 'history' }); return false; }
     const b = player.body, from = { x: b.x, y: b.y, z: b.z }, s = echo.origin;
     player.energy = 0;
@@ -324,24 +338,49 @@ export function createGame(opts = {}) {
     return true;
   }
 
+  // PHASE SWAP: during the replay, press the echo key again to trade places with the echo. The echo stops
+  // replaying and collapses on the spot you just left - right on top of whatever was chasing you.
+  function phaseSwap() {
+    const e = g.echo;
+    if (!e || e.state !== 'replay' || e.swapped || !player.alive || e.clock - e.start < ECHO.swapMin) {
+      emit('echoDenied', { energy: player.energy, reason: e?.state === 'replay' && !e.swapped ? 'swapEarly' : 'busy' });
+      return false;
+    }
+    const b = player.body, from = { x: b.x, y: b.y, z: b.z }, to = { x: e.pose.x, y: e.pose.y, z: e.pose.z };
+    b.x = to.x; b.y = to.y; b.z = to.z; b.vx = 0; b.vy = 0; b.vz = 0; b.grounded = false; b.noGravity = false; b.padLock = 0;
+    player.dash.t = 0;
+    player.invuln = Math.max(player.invuln, ECHO.swapInvuln);
+    e.swapped = true;
+    collapseEcho(from);
+    if (stats.swapSurge > 0) { g.surgeT = ECHO.surgeTime; player.dash.charges = stats.dashCharges; player.dash.recharge = 0; }
+    g.record.swaps += 1;
+    for (const o of g.enemies) o.targetT = 0;
+    emit('echoSwap', { from, to, surge: stats.swapSurge > 0 });
+    return true;
+  }
+
+  // Ends the replay: enemies near `center` are dragged in, then the blast follows after ECHO.pullTime.
+  function collapseEcho(center) {
+    const e = g.echo;
+    e.state = 'collapse';
+    e.collapseT = ECHO.pullTime;
+    e.center = { x: center.x, y: center.y, z: center.z };
+    const R = ECHO.radius + stats.implodeRadius;
+    for (const o of g.enemies) {
+      if (o.alive && o.spawnT <= 0 && Math.hypot(o.x - e.center.x, o.z - e.center.z) < R && Math.abs(o.y - e.center.y) < 5) {
+        o.pull = { x: e.center.x, y: e.center.y, z: e.center.z, t: ECHO.pullTime };
+      }
+    }
+    emit('echoCollapse', { ...e.center, r: R, swap: e.swapped });
+  }
+
   function stepEcho(dt) {
     const e = g.echo;
     if (!e) return;
     if (e.state === 'replay') {
       const { shots, finished } = advanceEcho(e, dt);
       for (const s of shots) fireShot(s.origin, s.dirs, WEAPONS.find(w => w.id === s.weapon) || WEAPONS[0], true);
-      if (finished) {
-        e.state = 'collapse';
-        e.collapseT = ECHO.pullTime;
-        e.center = { x: e.pose.x, y: e.pose.y, z: e.pose.z };
-        const R = ECHO.radius + stats.implodeRadius;
-        for (const o of g.enemies) {
-          if (o.alive && o.spawnT <= 0 && Math.hypot(o.x - e.center.x, o.z - e.center.z) < R && Math.abs(o.y - e.center.y) < 5) {
-            o.pull = { x: e.center.x, y: e.center.y, z: e.center.z, t: ECHO.pullTime };
-          }
-        }
-        emit('echoCollapse', { ...e.center, r: R });
-      }
+      if (finished) collapseEcho(e.pose);
     } else if (e.state === 'collapse') {
       e.collapseT -= dt;
       if (e.collapseT <= 0) {
@@ -356,6 +395,7 @@ export function createGame(opts = {}) {
           applyDamage(g.boss, { dmg: base * 1.5, weak: false, point: { x: g.boss.x, y: g.boss.y, z: g.boss.z } }, true, 'implode');
         }
         g.echo = null;
+        if (player.energy >= ECHO.cost) emit('echoReady', {}); // recharged while the echo was still out
       }
     }
   }
@@ -435,6 +475,7 @@ export function createGame(opts = {}) {
     refreshArsenal(g.arsenal, stats);
     if (id === 'extmag') g.arsenal.slots.forEach((s, i) => { s.mag = magSize(WEAPONS[i], stats); });
     if (id === 'dashcell') player.dash.charges = stats.dashCharges;
+    g.recorder.setWindow(stats.echoWindow);
     emit('upgradeChosen', { id, name: u.cn });
     beginIntermission();
     return true;
@@ -528,7 +569,7 @@ export function createGame(opts = {}) {
     }
     if (echoLive()) {
       const q = g.echo.pose;
-      if (Math.hypot(q.x - x, q.z - z) < r) g.echo.hitFlash = 0.15;
+      if (Math.hypot(q.x - x, q.z - z) < r) echoHit(kind);
     }
   }
 
@@ -556,7 +597,7 @@ export function createGame(opts = {}) {
       const hx = a.x + (b.x - a.x) * first, hy = a.y + (b.y - a.y) * first, hz = a.z + (b.z - a.z) * first;
       if (p.kind === 'shell') { explode(hx, hy, hz, p.radius, p.damage, 'mortar'); continue; }
       if (first === tE && tE !== null) {
-        g.echo.hitFlash = 0.15;
+        echoHit(p.kind);
         emit('projectileHit', { kind: p.kind, x: hx, y: hy, z: hz, target: 'echo' });
       } else if (first === tP && tP !== null) {
         const dealt = hurtPlayer(p.damage, { x: a.x - p.vx, z: a.z - p.vz }, p.kind);
@@ -575,18 +616,22 @@ export function createGame(opts = {}) {
       if (!bm.fired) {
         bm.t -= dt;
         if (bm.t > 0.22) {
+          // Track the chosen target; if the echo it locked onto is gone, swing back to the player.
+          const tp = targetPoint(bm.target === 'echo' && echoLive() ? 'echo' : 'player');
           const k = 1 - Math.exp(-6 * dt);
-          bm.aim.x += (pb.x - bm.aim.x) * k; bm.aim.y += (pb.y + 1.1 - bm.aim.y) * k; bm.aim.z += (pb.z - bm.aim.z) * k;
+          bm.aim.x += (tp.x - bm.aim.x) * k; bm.aim.y += (tp.y + 1.1 - bm.aim.y) * k; bm.aim.z += (tp.z - bm.aim.z) * k;
         }
         if (bm.t <= 0) {
           const d = normalize({ x: bm.aim.x - bm.from.x, y: bm.aim.y - bm.from.y, z: bm.aim.z - bm.from.z });
           const wall = firstBoxHit(bm.from, d, layout.rayBoxes, 90), L = wall ? wall.t : 90;
           bm.end = { x: bm.from.x + d.x * L, y: bm.from.y + d.y * L, z: bm.from.z + d.z * L };
           bm.fired = true;
-          const res = segSegDist2(bm.from, bm.end, { x: pb.x, y: pb.y + PLAYER.radius, z: pb.z }, { x: pb.x, y: pb.y + PLAYER.height - PLAYER.radius, z: pb.z });
-          const hit = player.alive && res.d2 < (PLAYER.radius + 0.32) ** 2;
+          const capsHit = (x, y, z) => segSegDist2(bm.from, bm.end, { x, y: y + PLAYER.radius, z }, { x, y: y + PLAYER.height - PLAYER.radius, z }).d2 < (PLAYER.radius + 0.32) ** 2;
+          const hit = player.alive && capsHit(pb.x, pb.y, pb.z);
           if (hit) hurtPlayer(22 * diff.damage, bm.from, 'beam');
-          emit('beamFire', { from: { ...bm.from }, to: { ...bm.end }, hit });
+          const echoStruck = echoLive() && capsHit(g.echo.pose.x, g.echo.pose.y, g.echo.pose.z);
+          if (echoStruck) echoHit('beam');
+          emit('beamFire', { from: { ...bm.from }, to: { ...bm.end }, hit, echo: echoStruck });
         }
         keep.push(bm);
       } else {
@@ -673,7 +718,7 @@ export function createGame(opts = {}) {
     const victory = g.mode === 'victory';
     return {
       victory, wave: g.wave, score: g.score.total, time: g.time, kills: g.record.kills, weakKills: g.record.weakKills,
-      accuracy: accuracy(g.record), echoes: g.record.echoes, echoKills: g.record.echoKills, maxCombo: g.score.maxCombo,
+      accuracy: accuracy(g.record), echoes: g.record.echoes, echoKills: g.record.echoKills, swaps: g.record.swaps, paradoxKills: g.record.paradoxKills, maxCombo: g.score.maxCombo,
       damageTaken: Math.round(g.record.damageTaken), damageDealt: Math.round(g.record.damageDealt), difficulty: diff.id,
       rank: rankFor(g.score.total, victory), upgrades: { ...g.owned }, seed,
     };
@@ -684,6 +729,7 @@ export function createGame(opts = {}) {
     if (g.mode === 'victory' || g.mode === 'defeat') return g;
     const sdt = dt * (g.slowT > 0 ? 0.35 : 1);
     g.slowT = Math.max(0, g.slowT - dt);
+    g.surgeT = Math.max(0, g.surgeT - sdt);
     g.time += sdt;
     if (g.mode === 'upgrade' && Number.isInteger(input.choose) && g.offers?.[input.choose]) chooseUpgrade(g.offers[input.choose]);
     stepPlayer(player, sdt, input, world, stats, g.time, emit, g.arsenal.ads);
@@ -713,6 +759,6 @@ export function createGame(opts = {}) {
 
   function drainEvents() { const out = g.events; g.events = []; return out; }
 
-  Object.assign(g, { step, drainEvents, chooseUpgrade, triggerEcho, summary, hurtPlayer, spawnEnemy, startWave, fireShot, flows, navSmall, navLarge });
+  Object.assign(g, { step, drainEvents, chooseUpgrade, triggerEcho, phaseSwap, summary, hurtPlayer, spawnEnemy, startWave, fireShot, flows, navSmall, navLarge });
   return g;
 }

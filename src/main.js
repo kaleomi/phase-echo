@@ -112,7 +112,7 @@ function showUpgrades() {
   const cards = $('upgrade-cards');
   cards.innerHTML = game.offers.map((id, i) => {
     const u = getUpgrade(id), n = game.owned[id] || 0;
-    return `<button class="card" data-i="${i}" data-id="${id}"><div class="icon">${u.icon}</div><h3>${u.cn}</h3><h4>${u.en}</h4><p>${u.desc}</p><small>${'◆'.repeat(n)}${'◇'.repeat(u.max - n)}</small><kbd>${i + 1}</kbd></button>`;
+    return `<button class="card${u.echo ? ' echo-mod' : ''}" data-i="${i}" data-id="${id}">${u.echo ? '<span class="tag">残影改造</span>' : ''}<div class="icon">${u.icon}</div><h3>${u.cn}</h3><h4>${u.en}</h4><p>${u.desc}</p><small>${'◆'.repeat(n)}${'◇'.repeat(u.max - n)}</small><kbd>${i + 1}</kbd></button>`;
   }).join('');
   $('upgrade-wave').textContent = `第 ${game.wave} 波完成 — 选择一个模块`;
   show('upgrade');
@@ -150,7 +150,8 @@ function showResults(summary) {
   const rows = [
     ['得分', summary.score.toLocaleString('en-US') + (isBest ? '  ★ 新纪录' : '')], ['波次', `${summary.wave} / 10`], ['用时', `${mins}:${String(secs).padStart(2, '0')}`],
     ['击杀', summary.kills], ['弱点击杀', summary.weakKills], ['命中率', `${Math.round(summary.accuracy * 100)}%`], ['最高连击', summary.maxCombo],
-    ['相位残影', `${summary.echoes} 次 · ${summary.echoKills} 击杀`], ['承受伤害', summary.damageTaken], ['难度', DIFFICULTY[summary.difficulty].cn],
+    ['相位残影', `${summary.echoes} 次 · ${summary.echoKills} 击杀`], ['相位换位', `${summary.swaps} 次`], ['悖论击杀', summary.paradoxKills],
+    ['承受伤害', summary.damageTaken], ['难度', DIFFICULTY[summary.difficulty].cn],
   ];
   $('results-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
   const ups = Object.entries(summary.upgrades).map(([id, n]) => `${getUpgrade(id)?.icon || ''} ${getUpgrade(id)?.cn || id}${n > 1 ? ' ×' + n : ''}`);

@@ -203,3 +203,13 @@ input[type="checkbox"] { accent-color: var(--cyan); width: 18px; height: 18px; }
   #toast { bottom: 26%; }
   #echo-timeline { bottom: 32%; }
 }
+
+/* ---------------------------------------------------------------- echo depth: swap / paradox / surge / echo mods */
+#echo-box.swap .bar { border-color: #fff; box-shadow: 0 0 14px rgba(185, 251, 255, 0.9); }
+#echo-box.swap span { color: #fff; animation: blink 0.5s infinite; }
+.kf.paradox { border-color: #b9fbff; background: linear-gradient(90deg, rgba(5, 8, 18, 0.65), rgba(34, 230, 255, 0.18)); }
+.kf i.px { color: #b9fbff; text-shadow: 0 0 8px var(--cyan); }
+#hud.surge #crosshair i { background: #fff; box-shadow: 0 0 8px var(--cyan), 0 0 16px var(--cyan); }
+#hud.surge #weapon-name::after { content: '  ⇄ SURGE'; color: #b9fbff; text-shadow: 0 0 8px var(--cyan); }
+.card.echo-mod { background: linear-gradient(180deg, rgba(185, 251, 255, 0.14), rgba(10, 14, 30, 0.92)); border-color: rgba(185, 251, 255, 0.55); }
+.card.echo-mod .tag { position: absolute; top: 10px; right: 12px; font: 600 10px var(--mono); letter-spacing: 0.2em; color: #b9fbff; }

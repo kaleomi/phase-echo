@@ -15,7 +15,7 @@ export function createHud(camera) {
     cross: $('crosshair'), hit: $('hitmarker'), dmgLayer: $('damage-layer'), indicators: $('indicators'), feed: $('killfeed'),
     wave: $('wave-label'), enemies: $('enemy-count'), score: $('score'), combo: $('combo'), banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
     boss: $('boss-bar'), bossFill: $('boss-fill'), bossGhost: $('boss-ghost'), bossPhase: $('boss-phase'), toast: $('toast'), vignette: $('vignette'), echoTint: $('echo-tint'),
-    timeline: $('echo-timeline'), timelineFill: $('echo-timeline-fill'), reload: $('reload-ring'), reloadFill: $('reload-fill'), scope: $('scope'), lowHp: $('lowhp'), intermission: $('intermission'),
+    timeline: $('echo-timeline'), timelineFill: $('echo-timeline-fill'), timelineLabel: document.querySelector('#echo-timeline span'), reload: $('reload-ring'), reloadFill: $('reload-fill'), scope: $('scope'), lowHp: $('lowhp'), intermission: $('intermission'),
   };
   let hitT = 0, hpGhost = 100, bossGhost = 1, toastT = 0, bannerT = 0, lastWeapon = -1, lastSlots = '', lastDash = '';
   const numbers = [];
@@ -45,7 +45,10 @@ export function createHud(camera) {
     el.hpText.textContent = `${Math.ceil(p.hp)}`;
     const ef = Math.min(1, p.energy / ECHO.cost);
     el.energy.style.width = `${ef * 100}%`;
-    el.energyText.textContent = game.echo ? 'ECHO ACTIVE' : ef >= 1 ? 'READY  [Q]' : `${Math.floor(ef * 100)}%`;
+    const canSwap = game.echo?.state === 'replay' && !game.echo.swapped && game.echo.clock - game.echo.start >= ECHO.swapMin;
+    el.energyText.textContent = game.echo ? (canSwap ? '[Q] 换位' : 'ECHO ACTIVE') : ef >= 1 ? 'READY  [Q]' : `${Math.floor(ef * 100)}%`;
+    el.echoBox.classList.toggle('swap', canSwap);
+    el.root.classList.toggle('surge', game.surgeT > 0);
     el.echoBox.classList.toggle('ready', ef >= 1 && !game.echo);
     const dashKey = `${p.dash.charges}/${st.dashCharges}/${Math.round(p.dash.recharge * 10)}`;
     if (dashKey !== lastDash) {
@@ -114,7 +117,8 @@ export function createHud(camera) {
     // Echo timeline.
     if (game.echo && game.echo.state === 'replay') {
       el.timeline.classList.add('show');
-      el.timelineFill.style.width = `${(1 - (game.echo.end - game.echo.clock) / ECHO.window) * 100}%`;
+      el.timelineFill.style.width = `${(1 - (game.echo.end - game.echo.clock) / Math.max(0.1, game.echo.end - game.echo.start)) * 100}%`;
+      el.timelineLabel.textContent = canSwap ? 'ECHO REPLAY · [Q] 相位换位' : 'ECHO REPLAY';
     } else el.timeline.classList.remove('show');
     el.vignette.style.opacity = Math.min(1, fxState.hurtFx * 0.9 + (hpFrac < 0.3 ? 0.35 + 0.15 * Math.sin(performance.now() / 150) : 0));
     el.echoTint.style.opacity = fxState.echoFx * 0.8 + (game.echo ? 0.18 : 0);
@@ -168,8 +172,8 @@ export function createHud(camera) {
     },
     killfeed(ev) {
       const d = document.createElement('div');
-      d.className = `kf${ev.weak ? ' weak' : ''}${ev.echo ? ' echo' : ''}`;
-      d.innerHTML = `<span>${ev.echo ? '◈ 残影' : '▸'} ${NAMES[ev.enemy] || ev.enemy}</span><b>+${ev.points}</b>${ev.weak ? '<i>弱点</i>' : ''}`;
+      d.className = `kf${ev.weak ? ' weak' : ''}${ev.echo ? ' echo' : ''}${ev.paradox ? ' paradox' : ''}`;
+      d.innerHTML = `<span>${ev.echo ? '◈ 残影' : '▸'} ${NAMES[ev.enemy] || ev.enemy}</span><b>+${ev.points}</b>${ev.paradox ? '<i class="px">悖论</i>' : ''}${ev.weak ? '<i>弱点</i>' : ''}`;
       el.feed.prepend(d);
       setTimeout(() => d.classList.add('out'), 2200);
       setTimeout(() => d.remove(), 2700);
@@ -183,7 +187,12 @@ export function createHud(camera) {
     flashAmmo() { el.ammo.classList.remove('flash'); void el.ammo.offsetWidth; el.ammo.classList.add('flash'); toast('弹药耗尽 — 切换武器或寻找补给', 1.4, 'red'); },
     dash() { el.dash.classList.remove('pulse'); void el.dash.offsetWidth; el.dash.classList.add('pulse'); },
     echoReady() { toast('相位残影就绪 — 按 Q 回溯', 1.8, 'cyan'); el.echoBox.classList.remove('pulse'); void el.echoBox.offsetWidth; el.echoBox.classList.add('pulse'); },
-    echoDenied(reason) { toast(reason === 'history' ? '相位记录不足' : '相位能量不足', 0.9, 'red'); },
+    echoDenied(reason) {
+      if (reason === 'busy') return; // second press while the echo is already collapsing: nothing to say
+      toast(reason === 'history' ? '相位记录不足' : reason === 'swapEarly' ? '残影尚未稳定 — 稍后再按 Q 换位' : '相位能量不足', 0.9, 'red');
+    },
+    echoSwap(surge) { toast(surge ? '相位换位 · 换位冲击 伤害 +40%' : '相位换位 — 残影在原位坍缩', 1.3, 'cyan'); },
+    paradox() { toast('悖论击杀 · 得分 ×1.5 · 相位能量 +10', 1.1, 'cyan'); },
     echoStart(healed) { toast(healed > 1 ? `相位回溯 · 恢复 ${Math.round(healed)} 生命` : '相位回溯', 1.2, 'cyan'); },
     bossIntro() { banner('RESONATOR PRIME', '共振主脑 — 击碎护盾板，瞄准核心之眼', 3.2, 'boss'); },
     bossPhase(n) { banner(`PHASE ${['I', 'II', 'III'][n - 1]}`, n === 2 ? '护盾板减少 — 螺旋弹幕与召唤' : '核心暴露 — 全面过载', 2.2, 'boss'); },

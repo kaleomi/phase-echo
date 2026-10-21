@@ -249,7 +249,7 @@ export function createRenderer(canvas, settings) {
       v.root.rotation.y = e.pose.yaw;
       v.gun.rotation.x = e.pose.pitch;
       v.head.rotation.x = e.pose.pitch;
-      const left = (e.end - e.clock) / ECHO.window;
+      const left = (e.end - e.clock) / Math.max(0.1, e.end - e.start);
       v.mat.opacity = (0.3 + (e.hitFlash > 0 ? 0.35 : 0) + Math.sin(time * 25) * 0.04) * near;
       v.edge.opacity = (0.5 + 0.3 * Math.sin(time * 12)) * near;
       v.visor.material.opacity = near;
@@ -258,6 +258,8 @@ export function createRenderer(canvas, settings) {
       echoLight.intensity = 5 + (1 - left) * 4;
     } else {
       const k = 1 - Math.max(0, e.collapseT) / ECHO.pullTime;
+      v.root.position.set(e.center.x, e.center.y, e.center.z); // after a phase swap the collapse is where you stood
+      echoLight.position.set(e.center.x, e.center.y + 1.2, e.center.z);
       v.root.scale.set(1 - k * 0.8, 1 + k * 0.6, 1 - k * 0.8);
       v.mat.opacity = (0.5 + k * 0.5) * near;
       v.edge.opacity = 0.8 * near;
@@ -391,6 +393,7 @@ export function createRenderer(canvas, settings) {
           audio.play(big ? 'explode' : 'small', ev);
           audio.play('kill');
           if (ev.points) hud.killfeed(ev);
+          if (ev.paradox) { audio.play('paradox'); fx.ring(vec(ev, 1), 0xb9fbff, 0.4, 2.6, 0.5, false); hud.paradox(); }
           addShake(big ? 0.6 : 0.12);
           break;
         }
@@ -439,7 +442,23 @@ export function createRenderer(canvas, settings) {
         }
         case 'echoCollapse': audio.play('echoCollapse', ev); fx.ring(vec(ev, 0.1), 0x33f0ff, ev.r, 0.3, ECHO.pullTime); break;
         case 'echoBlast': audio.play('echoBlast', ev); fx.explosion(vec(ev), 0x33f0ff, ev.r * 0.7); fx.light(vec(ev), 0x33f0ff, 80, 20, 0.5); addShake(0.5); break;
-        case 'echoHit': break;
+        case 'echoHit': if (ev.x !== undefined) fx.sparks(vec(ev), 0x9ff6ff, 6, 4, 0.3, 4); break;
+        case 'echoSwap': {
+          audio.play('swap');
+          echoFx = 1;
+          fovKick = 10;
+          // Streak from the spot you left (now collapsing) towards your new position; stops short of the camera.
+          const from = vec(ev.from, 1), to = vec(ev.to, 1), len = from.distanceTo(to);
+          if (len > 2) {
+            const end = from.clone().lerp(to, (len - 1.6) / len);
+            fx.tracer(from, end, 0xb9fbff, 0.06, 0.4, 0.9);
+            for (let k = 0; k < 12; k++) fx.sparks(from.clone().lerp(end, k / 12), 0xffffff, 2, 1.5, 0.5, 0);
+          }
+          fx.flash(from, 0x33f0ff, 3, 0.3);
+          fx.ring(vec(ev.to, 0.05), 0xb9fbff, 0.5, 2.5, 0.4);
+          hud.echoSwap(ev.surge);
+          break;
+        }
         case 'gateWarn': { const g = arena.gates[ev.gate]; if (g) g.warn = 1.2; audio.play('gate', { x: ev.x, y: 1.5, z: ev.z }, 80); break; }
         case 'enemySpawn': fx.flash(vec(ev, 1), ENEMY_COLORS[ev.enemy], 3, 0.3); fx.sparks(vec(ev, 1), ENEMY_COLORS[ev.enemy], 20, 5, 0.5, 2); audio.play('spawn', ev, 40); break;
         case 'shockwave': break;

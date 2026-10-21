@@ -2,15 +2,19 @@
 // Rewinding snaps the player back to where they were three seconds ago and spawns an Echo that replays
 // that recording in real time: it walks the same route and re-fires the same shots at 65% damage, draws
 // enemy aggro as a decoy, and finally collapses into an implosion that drags enemies in and detonates.
+// Pressing the echo key again mid-replay performs a PHASE SWAP: you trade places with the echo, which
+// collapses on the spot you just left. A kill landed by both you and the echo within a second is a PARADOX.
 export const ECHO = Object.freeze({
   window: 3, rate: 30, cost: 100, damage: 0.65, minLength: 0.6, invuln: 0.5, heal: 0.5,
   pullTime: 0.55, radius: 5.5, blast: 70, killEnergy: 0.5,
+  swapMin: 0.35, swapInvuln: 0.35, paradoxWindow: 1.0, paradoxBonus: 1.5, paradoxEnergy: 10,
+  siphonEnergy: 6, surgeTime: 2.5,
 });
 
 export function createRecorder(window = ECHO.window, rate = ECHO.rate) {
   const samples = [], shots = [];
   let nextAt = -Infinity;
-  const keep = window + 0.5;
+  let keep = window + 0.5;
   function trim(now) {
     while (samples.length > 2 && samples[1].t < now - keep) samples.shift();
     while (shots.length && shots[0].t < now - keep) shots.shift();
@@ -26,6 +30,7 @@ export function createRecorder(window = ECHO.window, rate = ECHO.rate) {
     shot(now, origin, dirs, weaponId) { shots.push({ t: now, origin: { ...origin }, dirs: dirs.map(d => ({ ...d })), weapon: weaponId }); },
     clear() { samples.length = 0; shots.length = 0; nextAt = -Infinity; },
     length(now) { return samples.length ? now - samples[0].t : 0; },
+    setWindow(w) { keep = w + 0.5; },
   };
 }
 
@@ -50,16 +55,16 @@ export function sampleAt(samples, t) {
 }
 
 // Builds the echo from the recorder at time `now`. Returns null if there is not enough history.
-export function beginEcho(recorder, now) {
+export function beginEcho(recorder, now, window = ECHO.window) {
   if (!recorder.samples.length) return null;
-  const t0 = Math.max(recorder.samples[0].t, now - ECHO.window);
+  const t0 = Math.max(recorder.samples[0].t, now - window);
   if (now - t0 < ECHO.minLength - 1e-9) return null;
   const samples = recorder.samples.filter(s => s.t >= t0 - 1 / ECHO.rate);
   const start = sampleAt(samples, t0);
   const shots = recorder.shots.filter(s => s.t > t0 && s.t <= now);
   return {
     active: true, state: 'replay', clock: t0, start: t0, end: now, samples, shots, pose: start, prevPose: start,
-    collapseT: 0, hitFlash: 0, origin: start, vx: 0, vz: 0,
+    collapseT: 0, hitFlash: 0, origin: start, vx: 0, vz: 0, swapped: false,
   };
 }
 

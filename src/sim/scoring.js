@@ -6,12 +6,12 @@ export function createScore() { return { total: 0, combo: 0, comboT: 0, multipli
 
 export function multiplierFor(combo) { return Math.min(MAX_MULTIPLIER, 1 + 0.1 * Math.max(0, combo - 1)); }
 
-export function addKill(sc, base, { weak = false, diffScore = 1 } = {}) {
+export function addKill(sc, base, { weak = false, diffScore = 1, bonus = 1 } = {}) {
   sc.combo += 1;
   sc.comboT = COMBO_WINDOW;
   sc.maxCombo = Math.max(sc.maxCombo, sc.combo);
   sc.multiplier = multiplierFor(sc.combo);
-  const points = Math.round(base * (weak ? 1.5 : 1) * sc.multiplier * diffScore);
+  const points = Math.round(base * (weak ? 1.5 : 1) * bonus * sc.multiplier * diffScore);
   sc.total += points;
   return points;
 }

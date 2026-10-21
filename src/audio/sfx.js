@@ -93,6 +93,12 @@ export function createAudio() {
     echoStart(d) { osc('sawtooth', 1800, 90, 0.6, 0.25, d); osc('sine', 120, 900, 0.5, 0.25, d); noise(0.6, 0.4, d, { type: 'bandpass', f0: 6000, f1: 300, q: 2 }); },
     echoCollapse(d) { osc('sine', 80, 900, 0.55, 0.35, d, { attack: 0.4 }); },
     echoBlast(d) { noise(0.8, 1, d, { type: 'lowpass', f0: 4000, f1: 60 }); osc('sine', 60, 20, 0.8, 1, d); osc('triangle', 900, 200, 0.4, 0.2, d); },
+    // Phase swap: a reversed rewind sweep (low -> high) with a glassy snap at the end.
+    swap(d) { osc('sawtooth', 90, 1600, 0.32, 0.22, d); osc('sine', 900, 180, 0.3, 0.2, d); noise(0.25, 0.35, d, { type: 'bandpass', f0: 300, f1: 6000, q: 2 }); osc('triangle', 2400, 2350, 0.12, 0.12, d, { delay: 0.26 }); },
+    // Paradox kill: two detuned bell tones a beat apart (you, then your echo).
+    paradox(d) { osc('sine', 1318, 1318, 0.35, 0.12, d); osc('sine', 1975, 1975, 0.4, 0.1, d, { delay: 0.09 }); osc('triangle', 659, 662, 0.4, 0.08, d, { delay: 0.09 }); },
+    // Rewinder snapping back in time: a reversed swell that cuts off sharply.
+    rewind(d) { osc('sawtooth', 1400, 120, 0.45, 0.18, d, { attack: 0.3 }); noise(0.45, 0.25, d, { type: 'bandpass', f0: 5000, f1: 400, q: 3, attack: 0.3 }); },
     denied(d) { osc('square', 200, 180, 0.1, 0.1, d); osc('square', 150, 140, 0.12, 0.1, d, { delay: 0.1 }); },
     gate(d) { osc('sine', 300, 600, 0.9, 0.12, d, { attack: 0.3 }); noise(0.9, 0.12, d, { f0: 400, f1: 2000, q: 3, attack: 0.3 }); },
     spawn(d) { noise(0.3, 0.3, d, { type: 'highpass', f0: 3000, f1: 600 }); osc('sine', 900, 200, 0.25, 0.15, d); },
@@ -114,7 +120,7 @@ export function createAudio() {
   };
 
   // Voice cap: at most ~32 one-shots alive at once (each lasts < 1 s); cosmetic sounds are dropped first.
-  const IMPORTANT = new Set(['hurt', 'echoStart', 'echoBlast', 'bossPhase', 'bossDie', 'victory', 'defeat', 'waveStart', 'waveClear', 'beamTell', 'heavyTell', 'lungeTell', 'upgrade', 'lowHp']);
+  const IMPORTANT = new Set(['hurt', 'echoStart', 'swap', 'echoBlast', 'bossPhase', 'bossDie', 'victory', 'defeat', 'waveStart', 'waveClear', 'beamTell', 'heavyTell', 'lungeTell', 'upgrade', 'lowHp']);
   let voices = 0;
   function play(name, pos = null, gap = 0) {
     if (!ensure() || ctx.state !== 'running') return;
