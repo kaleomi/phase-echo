@@ -14,6 +14,7 @@ import { DIFFICULTY, WAVE_COUNT, isBossWave, buildSpawnQueue, maxAlive, spawnInt
 import { ENEMY_TYPES, createEnemy, updateEnemy, weakCenter, forwardOf, isStaggerable, breakAnchor, anchorExposed } from './enemies.js';
 import { BOSS, createBoss, stepBoss, damageBoss, platePositions } from './boss.js';
 import { ECHO, createRecorder, beginEcho, advanceEcho } from './echo.js';
+import { getMutator, applyMutator } from './daily.js';
 
 export const PICKUP = Object.freeze({ health: 25, scatter: 8, rail: 4, life: 25, collect: 1.15, station: { refill: 0.5, cooldown: 25, radius: 1.7 } });
 export const ENERGY_PER_DAMAGE = 0.12;
@@ -32,7 +33,9 @@ function sharedArena() {
 
 export function createGame(opts = {}) {
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
-  const diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
+  const mutator = getMutator(opts.mutator);
+  const stats = baseStats();
+  const diff = applyMutator(mutator, stats, DIFFICULTY[opts.difficulty] || DIFFICULTY.normal);
   const rng = createRng(seed);
   const { layout, navSmall, navLarge } = sharedArena();
   const world = { boxes: layout.boxes, pads: layout.pads, bounds: layout.bounds };
@@ -40,11 +43,10 @@ export function createGame(opts = {}) {
     small: { player: createFlowField(navSmall), echo: createFlowField(navSmall) },
     large: { player: createFlowField(navLarge), echo: createFlowField(navLarge) },
   };
-  const stats = baseStats();
   const player = createPlayer(PLAYER_SPAWN, stats);
   const stations = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([sx, sz], i) => ({ id: i, x: 28 * sx, y: 0, z: 28 * sz, cd: 0 }));
   const g = {
-    seed, diff, rng, layout, world, stats, owned: {}, time: 0, mode: 'intermission', modeT: opts.firstDelay ?? FIRST_DELAY, wave: (opts.startWave ?? 1) - 1,
+    seed, diff, rng, layout, world, stats, owned: {}, time: 0, mutator: mutator?.id ?? null, daily: opts.daily ?? null, mode: 'intermission', modeT: opts.firstDelay ?? FIRST_DELAY, wave: (opts.startWave ?? 1) - 1,
     player, arsenal: createArsenal(stats), enemies: [], boss: null, projectiles: [], beams: [], shockwaves: [], pickups: [], stations,
     pending: [], echo: null, recorder: createRecorder(), score: createScore(), offers: null, events: [], nextId: 1, slowT: 0, surgeT: 0,
     spawnQueue: [], spawnT: 0, waveTime: 0, waveHurt: false, waveQueueLength: 0, lastGate: -1, contactCd: 0,
@@ -737,7 +739,7 @@ export function createGame(opts = {}) {
       victory, wave: g.wave, score: g.score.total, time: g.time, kills: g.record.kills, weakKills: g.record.weakKills,
       accuracy: accuracy(g.record), echoes: g.record.echoes, echoKills: g.record.echoKills, swaps: g.record.swaps, paradoxKills: g.record.paradoxKills, maxCombo: g.score.maxCombo,
       damageTaken: Math.round(g.record.damageTaken), damageDealt: Math.round(g.record.damageDealt), difficulty: diff.id,
-      rank: rankFor(g.score.total, victory), upgrades: { ...g.owned }, seed,
+      rank: rankFor(g.score.total, victory), upgrades: { ...g.owned }, seed, mutator: g.mutator, daily: g.daily,
     };
   }
 

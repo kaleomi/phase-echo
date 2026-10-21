@@ -26,6 +26,9 @@ export function buildSpawnQueue(rng, wave, diff = DIFFICULTY.normal) {
   const comp = WAVES[wave - 1];
   if (!comp || comp.boss) return [];
   const light = [], heavy = [];
+  // Mutators can add extra units to every wave from the second one on (e.g. CHRONO TIDE: +2 rewinders).
+  const extra = wave >= 2 && diff.extra ? diff.extra : {};
+  for (const [type, n] of Object.entries(extra)) for (let i = 0; i < n; i++) (type === 'bulwark' ? heavy : light).push(type);
   for (const [type, n] of Object.entries(comp)) {
     const count = Math.max(1, Math.round(n * diff.count));
     for (let i = 0; i < count; i++) (type === 'bulwark' ? heavy : light).push(type);

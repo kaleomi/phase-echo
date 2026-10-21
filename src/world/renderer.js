@@ -12,6 +12,7 @@ import { createViewmodel } from './viewmodel.js';
 import { PLAYER } from '../sim/player.js';
 import { platePositions, BOSS } from '../sim/boss.js';
 import { ECHO } from '../sim/echo.js';
+import { ghostPoseAt } from '../sim/ghost.js';
 
 const WEAPON_COLORS = { carbine: 0x22e6ff, scatter: 0xff9a3c, rail: 0xff2bd6 };
 const ENEMY_COLORS = { stalker: 0xff8a1f, sentinel: 0xb35cff, wisp: 0x7ff6ff, bulwark: 0xffc21f, rewinder: 0xd9b8ff, boss: 0xff2bd6 };
@@ -46,6 +47,7 @@ export function createRenderer(canvas, settings) {
   const enemyViews = new Map(), pickupViews = new Map(), shockViews = new Map(), beamViews = new Map(), freeBeams = [];
   let warmed = false;
   let bossView = null, echoView = null, stationViews = [];
+  let ghostTrack = null, ghostView = null; // best-run ghost (gold): survives clearWorld, hidden when unused
   const shake = { t: 0, amp: 0 };
   const kick = { pitch: 0 };
   let fovKick = 0, echoFx = 0, hurtFx = 0, time = 0, quality = settings.quality;
@@ -292,6 +294,32 @@ export function createRenderer(canvas, settings) {
       echoLight.intensity = 6 + k * 30;
       v.root.rotation.y += 0.3;
     }
+  }
+
+  function setGhost(track) {
+    ghostTrack = track || null;
+    if (ghostView) ghostView.root.visible = false;
+  }
+  function syncGhost(game) {
+    const pose = ghostTrack ? ghostPoseAt(ghostTrack, game.time) : null;
+    if (!pose) { if (ghostView) ghostView.root.visible = false; return; }
+    if (!ghostView) {
+      ghostView = createEchoModel();
+      ghostView.root.name = 'best-ghost';
+      ghostView.mat.color.set(0xffc46b);
+      ghostView.edge.color.set(0xffe2a8);
+      ghostView.visor.material.color.set(0xfff1c9);
+      scene.add(ghostView.root);
+    }
+    // Fainter than the echo and faded out when it overlaps the camera (both runs start on the same spot).
+    const pb = game.player.body, gap = Math.hypot(pose.x - pb.x, pose.z - pb.z) + Math.abs(pose.y - pb.y) * 0.5;
+    const near = Math.max(0, Math.min(1, (gap - 0.8) / 1.5));
+    ghostView.root.visible = near > 0.02;
+    ghostView.root.position.set(pose.x, pose.y, pose.z);
+    ghostView.root.rotation.y = pose.yaw;
+    ghostView.mat.opacity = 0.22 * near;
+    ghostView.edge.opacity = (0.42 + 0.1 * Math.sin(time * 4)) * near;
+    ghostView.visor.material.opacity = 0.7 * near;
   }
 
   function syncPickups(game) {
@@ -545,6 +573,7 @@ export function createRenderer(canvas, settings) {
     syncEnemies(game, dt);
     syncBoss(game);
     syncEcho(game);
+    syncGhost(game);
     syncPickups(game);
     syncShockwaves(game);
     syncBeams(game);
@@ -574,7 +603,7 @@ export function createRenderer(canvas, settings) {
     } catch { return { name: 'unknown', software: false }; }
   }
   const api = {
-    renderer, scene, camera, rendererInfo, setup, render, handleEvents, resize, setQuality, setResolutionScale, clearWorld, vm, hideViewmodel: false,
+    renderer, scene, camera, rendererInfo, setup, render, handleEvents, resize, setQuality, setResolutionScale, clearWorld, setGhost, vm, hideViewmodel: false,
     get resolutionScale() { return resScale; },
     look(dx, dy) { vm.look(dx, dy); },
     get fx() { return fx; },

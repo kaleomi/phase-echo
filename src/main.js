@@ -7,10 +7,12 @@ import { createRenderer } from './world/renderer.js';
 import { createHud } from './ui/hud.js';
 import { createInput } from './ui/input.js';
 import { createAudio } from './audio/sfx.js';
+import { dailySetup, getMutator } from './sim/daily.js';
+import { createGhostRecorder, decodeGhost } from './sim/ghost.js';
 
 const $ = id => document.getElementById(id);
 const SETTINGS_KEY = 'phase-echo.settings.v1', BEST_KEY = 'phase-echo.best.v1';
-const DEFAULTS = { sensitivity: 1, fov: 90, volume: 0.8, music: 0.45, quality: 'auto', invertY: false, toggleAds: false, shake: true, damageNumbers: true, difficulty: 'normal' };
+const DEFAULTS = { sensitivity: 1, fov: 90, volume: 0.8, music: 0.45, quality: 'auto', invertY: false, toggleAds: false, shake: true, damageNumbers: true, ghost: true, difficulty: 'normal' };
 function load(key, fallback) { try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || '{}') }; } catch { return { ...fallback }; } }
 const settings = load(SETTINGS_KEY, DEFAULTS);
 const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* storage disabled */ } };
@@ -42,6 +44,21 @@ const hud = createHud(view.camera);
 const lockHint = $('lock-hint');
 const input = createInput(canvas, settings);
 let game = null, menuGame = null, state = 'menu', last = performance.now(), acc = 0, frameTimes = [], deathCam = 0, pausedAt = 0;
+// Run bookkeeping: which leaderboard/ghost slot this run belongs to ('normal' | 'hard' | 'nightmare' | 'daily-YYYY-MM-DD').
+let runKey = 'normal', lastDaily = false, ghostRec = null, ghostBest = null;
+const cheats = params.has('god') || Number(params.get('wave')) > 1;
+
+// ---------------------------------------------------------------- best-run ghosts (localStorage)
+const GHOST_PREFIX = 'phase-echo.ghost.v1.';
+function loadGhost(key) { try { return decodeGhost(JSON.parse(localStorage.getItem(GHOST_PREFIX + key) || 'null')); } catch { return null; } }
+function saveGhost(key, data) {
+  try {
+    if (key.startsWith('daily-')) {
+      for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k?.startsWith(`${GHOST_PREFIX}daily-`) && k !== GHOST_PREFIX + key) localStorage.removeItem(k); }
+    }
+    localStorage.setItem(GHOST_PREFIX + key, JSON.stringify(data));
+  } catch { /* storage full or disabled: the ghost is a nicety */ }
+}
 
 // ---------------------------------------------------------------- screens
 const screens = ['menu', 'pause', 'upgrade', 'results', 'settings', 'howto'];
@@ -55,19 +72,28 @@ function setState(s) {
   hud.show(s === 'play' || s === 'upgrade' || s === 'pause' || s === 'dead' || s === 'ending');
 }
 
-function startRun() {
+function startRun(daily = false) {
   audio.unlock();
   audio.startMusic();
-  const diff = settings.difficulty in DIFFICULTY ? settings.difficulty : 'normal';
-  const seed = params.has('seed') ? Number(params.get('seed')) : undefined;
-  game = createGame({ seed, difficulty: diff, startWave: Number(params.get('wave')) || 1, invulnerable: params.has('god'), firstDelay: params.has('fast') ? 0.5 : undefined });
+  const dly = daily ? dailySetup() : null;
+  const diff = dly ? dly.difficulty : settings.difficulty in DIFFICULTY ? settings.difficulty : 'normal';
+  const seed = dly ? dly.seed : params.has('seed') ? Number(params.get('seed')) : undefined;
+  game = createGame({ seed, difficulty: diff, mutator: dly?.mutator.id, daily: dly?.key, startWave: Number(params.get('wave')) || 1, invulnerable: params.has('god'), firstDelay: params.has('fast') ? 0.5 : undefined });
   window.__phaseEcho.game = game;
+  runKey = dly ? `daily-${dly.key}` : diff;
+  lastDaily = !!dly;
+  ghostRec = createGhostRecorder();
+  ghostBest = settings.ghost ? loadGhost(runKey) : null;
   menuGame = null;
   view.hideViewmodel = false;
   view.setup(game);
+  view.setGhost(ghostBest);
   input.setLook(game.player.yaw, 0);
   deathCam = 0;
-  hud.banner('ECHO-7 竞技场', `难度：${DIFFICULTY[diff].cn} — 存活十波，击败 RESONATOR PRIME`, 3);
+  $('run-tag').textContent = dly ? `DAILY ${dly.key.slice(5)} · ${dly.mutator.cn}` : '';
+  const ghostNote = ghostBest ? ` · 金色身影是你的最佳一局（${Number(ghostBest.meta.score || 0).toLocaleString('en-US')}）` : '';
+  if (dly) hud.banner(`每日挑战 · ${dly.mutator.cn}`, `${dly.mutator.desc}${ghostNote}`, 3.4);
+  else hud.banner('ECHO-7 竞技场', `难度：${DIFFICULTY[diff].cn} — 存活十波，击败 RESONATOR PRIME${ghostNote}`, 3);
   show(null);
   setState('play');
   input.enable(true);
@@ -97,8 +123,10 @@ function quitToMenu() {
   audio.stopMusic();
   audio.resume();
   view.clearWorld();
+  view.setGhost(null);
   game = null;
   menuGame = null;
+  ghostRec = null; ghostBest = null;
   window.__phaseEcho.game = null;
   renderMenuBest();
   show('menu');
@@ -138,12 +166,19 @@ function showResults(summary) {
   input.enable(false);
   input.unlock();
   audio.stopMusic();
-  const key = summary.difficulty, prev = bests[key];
-  const isBest = !prev || summary.score > prev.score;
-  if (isBest) { bests[key] = { score: summary.score, wave: summary.wave, rank: summary.rank, victory: summary.victory, date: new Date().toISOString().slice(0, 10) }; try { localStorage.setItem(BEST_KEY, JSON.stringify(bests)); } catch { /* ignore */ } }
+  const key = runKey, prev = bests[key];
+  const isBest = !cheats && (!prev || summary.score > prev.score);
+  if (isBest) {
+    const date = new Date().toISOString().slice(0, 10);
+    bests[key] = { score: summary.score, wave: summary.wave, rank: summary.rank, victory: summary.victory, date };
+    if (key.startsWith('daily-')) for (const k of Object.keys(bests)) if (k.startsWith('daily-') && k !== key) delete bests[k];
+    try { localStorage.setItem(BEST_KEY, JSON.stringify(bests)); } catch { /* ignore */ }
+    if (ghostRec?.length > 1) saveGhost(key, ghostRec.serialize({ score: summary.score, wave: summary.wave, victory: summary.victory, date }));
+  }
+  const mut = getMutator(summary.mutator);
   $('results-title').textContent = summary.victory ? '任务完成' : '信号中断';
   $('results-title').className = summary.victory ? 'win' : 'lose';
-  $('results-sub').textContent = summary.victory ? 'RESONATOR PRIME 已被摧毁 — ECHO-7 恢复静默' : `在第 ${summary.wave} 波倒下`;
+  $('results-sub').textContent = (summary.daily ? `每日挑战 ${summary.daily} · ${mut?.cn} — ` : '') + (summary.victory ? 'RESONATOR PRIME 已被摧毁 — ECHO-7 恢复静默' : `在第 ${summary.wave} 波倒下`);
   $('results-rank').textContent = summary.rank;
   $('results-rank').dataset.rank = summary.rank;
   const mins = Math.floor(summary.time / 60), secs = Math.floor(summary.time % 60);
@@ -151,7 +186,7 @@ function showResults(summary) {
     ['得分', summary.score.toLocaleString('en-US') + (isBest ? '  ★ 新纪录' : '')], ['波次', `${summary.wave} / 10`], ['用时', `${mins}:${String(secs).padStart(2, '0')}`],
     ['击杀', summary.kills], ['弱点击杀', summary.weakKills], ['命中率', `${Math.round(summary.accuracy * 100)}%`], ['最高连击', summary.maxCombo],
     ['相位残影', `${summary.echoes} 次 · ${summary.echoKills} 击杀`], ['相位换位', `${summary.swaps} 次`], ['悖论击杀', summary.paradoxKills],
-    ['承受伤害', summary.damageTaken], ['难度', DIFFICULTY[summary.difficulty].cn],
+    ['承受伤害', summary.damageTaken], ['难度', DIFFICULTY[summary.difficulty].cn + (mut ? ` · ${mut.cn}` : '')],
   ];
   $('results-stats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
   const ups = Object.entries(summary.upgrades).map(([id, n]) => `${getUpgrade(id)?.icon || ''} ${getUpgrade(id)?.cn || id}${n > 1 ? ' ×' + n : ''}`);
@@ -163,6 +198,8 @@ function showResults(summary) {
 function renderMenuBest() {
   const b = bests[settings.difficulty];
   $('menu-best').textContent = b ? `最佳（${DIFFICULTY[settings.difficulty].cn}）：${b.score.toLocaleString('en-US')} · 波次 ${b.wave} · 评级 ${b.rank}${b.victory ? ' · 通关' : ''}` : '尚无记录';
+  const d = dailySetup(), db = bests[`daily-${d.key}`];
+  $('daily-info').textContent = `${d.key.slice(5)} · ${d.mutator.cn}：${d.mutator.desc}${db ? ` · 今日最佳 ${db.score.toLocaleString('en-US')}` : ''}`;
   document.querySelectorAll('[data-diff]').forEach(btn => btn.classList.toggle('active', btn.dataset.diff === settings.difficulty));
 }
 
@@ -189,6 +226,7 @@ function bindSettings() {
   bind('set-toggleads', 'toggleAds');
   bind('set-shake', 'shake');
   bind('set-dmgnum', 'damageNumbers');
+  bind('set-ghost', 'ghost');
 }
 function apply(key) {
   if (key === 'volume') audio.setVolume(settings.volume);
@@ -201,16 +239,17 @@ function closeSettings() { show(settingsReturn); }
 
 // ---------------------------------------------------------------- DOM events
 document.querySelectorAll('[data-diff]').forEach(btn => btn.addEventListener('click', () => { settings.difficulty = btn.dataset.diff; saveSettings(); audio.play('ui'); renderMenuBest(); }));
-$('btn-start').addEventListener('click', () => { audio.unlock(); audio.play('ui'); startRun(); });
+$('btn-start').addEventListener('click', () => { audio.unlock(); audio.play('ui'); startRun(false); });
+$('btn-daily').addEventListener('click', () => { audio.unlock(); audio.play('ui'); startRun(true); });
 $('btn-settings').addEventListener('click', () => { audio.unlock(); audio.play('ui'); openSettings('menu'); });
 $('btn-howto').addEventListener('click', () => { audio.unlock(); audio.play('ui'); show('howto'); });
 $('btn-howto-back').addEventListener('click', () => { audio.play('ui'); show('menu'); });
 $('btn-settings-back').addEventListener('click', () => { audio.play('ui'); closeSettings(); });
 $('btn-resume').addEventListener('click', () => { audio.play('ui'); resume(); });
 $('btn-pause-settings').addEventListener('click', () => { audio.play('ui'); openSettings('pause'); });
-$('btn-restart').addEventListener('click', () => { audio.play('ui'); audio.stopMusic(); startRun(); });
+$('btn-restart').addEventListener('click', () => { audio.play('ui'); audio.stopMusic(); startRun(lastDaily); });
 $('btn-quit').addEventListener('click', () => { audio.play('ui'); quitToMenu(); });
-$('btn-again').addEventListener('click', () => { audio.play('ui'); startRun(); });
+$('btn-again').addEventListener('click', () => { audio.play('ui'); startRun(lastDaily); });
 $('btn-menu').addEventListener('click', () => { audio.play('ui'); quitToMenu(); });
 document.querySelectorAll('button').forEach(b => b.addEventListener('mouseenter', () => audio.play('uiHover')));
 canvas.addEventListener('click', () => { if (state === 'play' && !input.locked) input.lock(); });
@@ -223,7 +262,7 @@ window.addEventListener('keydown', e => {
     else if (document.body.dataset.screen === 'settings') closeSettings();
     else if (document.body.dataset.screen === 'howto') show('menu');
   }
-  if (e.code === 'Enter' && state === 'menu' && document.body.dataset.screen === 'menu') startRun();
+  if (e.code === 'Enter' && state === 'menu' && document.body.dataset.screen === 'menu') startRun(false);
 });
 input.on('lockChange', locked => {
   // Losing pointer lock mid-game (Esc) pauses; the browser swallows the Esc keydown in that case.
@@ -242,6 +281,7 @@ function simulate(seconds, inp) {
   let first = true, t = 0;
   while (t < seconds - 1e-9 && (game.mode === 'wave' || game.mode === 'intermission' || game.mode === 'cleared' || game.mode === 'test')) {
     game.step(STEP, first ? inp : { ...inp, ...EDGE_OFF });
+    ghostRec?.sample(game.time, game.player.body, game.player.yaw);
     first = false;
     t += STEP;
     const events = game.drainEvents();
@@ -256,6 +296,7 @@ function tap(ev) { recentEvents.push(ev.type); if (recentEvents.length > 400) re
 function frame(nowMs) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (nowMs - last) / 1000);
+  const realDt = Math.min(1, Math.max(0, (nowMs - last) / 1000)); // uncapped-ish: UI timers that must not stretch on slow frames
   last = nowMs;
   frameTimes.push(dt);
   if (frameTimes.length > 120) frameTimes.shift();
@@ -275,7 +316,7 @@ function frame(nowMs) {
   if (rest.length) { view.handleEvents(rest, game, audio, hud); for (const ev of rest) { handleFlow(ev); tap(ev); } }
   const b = game.player.body;
   const roll = state === 'dead' ? Math.min(0.5, deathCam * 0.4) : 0;
-  if (state === 'dead') deathCam += dt;
+  if (state === 'dead') deathCam += realDt; // 2.2 s of real time, even when frames are slow
   const eyeY = b.y + PLAYER.eye - (state === 'dead' ? Math.min(1.3, deathCam * 1.6) : 0);
   const fxState = view.render(game, dt, { x: b.x, y: eyeY, z: b.z, yaw: game.player.yaw, pitch: game.player.pitch, roll });
   hud.update(game, dt, fxState);
@@ -305,7 +346,17 @@ function adaptResolution(dt) {
 function handleFlow(ev) {
   switch (ev.type) {
     case 'waveStart': audio.play('waveStart'); hud.banner(ev.boss ? '最终波次' : `WAVE ${ev.wave}`, ev.boss ? '共振主脑正在降临' : `${ev.count} 个敌对单位接近`, 2); break;
-    case 'waveClear': audio.play('waveClear'); hud.banner(ev.final ? 'ECHO-7 已肃清' : '波次完成', `+${ev.bonus.total.toLocaleString('en-US')}  (基础 ${ev.bonus.base} · 速度 ${ev.bonus.time}${ev.bonus.flawless ? ' · 无伤 ' + ev.bonus.flawless : ''})`, 2.2, 'clear'); break;
+    case 'waveClear': {
+      audio.play('waveClear');
+      hud.banner(ev.final ? 'ECHO-7 已肃清' : '波次完成', `+${ev.bonus.total.toLocaleString('en-US')}  (基础 ${ev.bonus.base} · 速度 ${ev.bonus.time}${ev.bonus.flawless ? ' · 无伤 ' + ev.bonus.flawless : ''})`, 2.2, 'clear');
+      ghostRec?.split(ev.wave, game.time);
+      const best = ghostBest?.splits?.[ev.wave];
+      if (best !== undefined) {
+        const d = game.time - best;
+        hud.toast(`对比最佳残影  ${d <= 0 ? '−' : '+'}${Math.abs(d).toFixed(1)} 秒`, 2.4, d <= 0 ? 'green' : 'red');
+      }
+      break;
+    }
     case 'intermission': if (ev.boss) hud.toast('最终波次即将开始 — 补给已投放', 2.2, 'orange'); break;
     case 'victory': audio.play('victory'); setState('ending'); setTimeout(() => { if (state === 'ending') showResults(ev); }, 1800); break;
     case 'defeat': audio.play('defeat'); setState('dead'); input.enable(false); break;
@@ -331,7 +382,9 @@ window.__phaseEcho = {
   game: null,
   get state() { return state; },
   get events() { return recentEvents.slice(); },
-  start: startRun,
+  start: () => startRun(false),
+  startDaily: () => startRun(true),
+  get ghost() { return { recorded: ghostRec?.length ?? 0, best: !!ghostBest, key: runKey }; },
   input,
   pause, resume, chooseUpgrade,
   // Deterministic fast-forward for automated tests on slow (software WebGL) machines.

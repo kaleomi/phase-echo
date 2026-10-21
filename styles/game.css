@@ -214,3 +214,19 @@ input[type="checkbox"] { accent-color: var(--cyan); width: 18px; height: 18px; }
 .card.echo-mod { background: linear-gradient(180deg, rgba(185, 251, 255, 0.14), rgba(10, 14, 30, 0.92)); border-color: rgba(185, 251, 255, 0.55); }
 .card.echo-mod .tag { position: absolute; top: 10px; right: 12px; font: 600 10px var(--mono); letter-spacing: 0.2em; color: #b9fbff; }
 .dmg.heal { color: #d9b8ff; text-shadow: 0 0 8px rgba(217, 184, 255, 0.9); }
+
+/* ---------------------------------------------------------------- daily challenge / run tag */
+button.daily { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 11px 16px; text-align: left; border-color: rgba(255, 196, 107, 0.6); background: linear-gradient(90deg, rgba(255, 196, 107, 0.16), rgba(10, 14, 30, 0.6)); }
+button.daily .d-title { font-size: 16px; color: #ffe2a8; letter-spacing: 0.15em; }
+button.daily .d-title small { font: 600 10px var(--mono); opacity: 0.6; margin-left: 8px; letter-spacing: 0.25em; }
+button.daily .d-info { font-size: 12px; color: #c9b48d; letter-spacing: 0; font-weight: 400; line-height: 1.45; }
+button.daily:hover { border-color: #ffc46b; box-shadow: 0 0 18px rgba(255, 196, 107, 0.35); }
+#run-tag { margin-top: 6px; font: 600 12px var(--mono); color: #ffc46b; letter-spacing: 0.15em; text-shadow: 0 0 8px rgba(255, 196, 107, 0.6); }
+#run-tag:empty { display: none; }
+/* How-to grew with the echo features: keep its back button pinned and tighten text on short screens. */
+.panel.wide > #btn-howto-back { position: sticky; bottom: 0; flex-shrink: 0; background: rgba(8, 12, 26, 0.97); box-shadow: 0 -12px 18px rgba(6, 9, 20, 0.92); }
+@media (max-height: 860px) {
+  .panel.wide p { line-height: 1.5; font-size: 13px; margin: 4px 0; }
+  .panel.wide h3 { margin: 10px 0 4px; }
+  .howto-grid ul { gap: 4px; font-size: 13px; }
+}

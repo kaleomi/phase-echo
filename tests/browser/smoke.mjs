@@ -174,6 +174,35 @@ try {
     await pe(() => { window.__phaseEcho.game.mode = 'wave'; });
   });
 
+  await step('phase swap: second Q mid-replay trades places, echo collapses at the old spot', async () => {
+    await pe(() => { const g = window.__phaseEcho.game; g.mode = 'test'; g.player.energy = 100; window.__phaseEcho.input.inject({ keys: ['KeyD'] }); });
+    await advance(1.5);
+    await pe(() => { window.__phaseEcho.input.release(['KeyD']); window.__phaseEcho.input.inject({ echo: true }); });
+    await advance(0.6);
+    const r = await pe(() => {
+      const P = window.__phaseEcho, g = P.game, before = { ...g.player.body }, at = { ...g.echo.pose };
+      P.input.inject({ echo: true });
+      P.advance(0.02);
+      return { moved: Math.hypot(g.player.body.x - at.x, g.player.body.z - at.z), center: g.echo && Math.hypot(g.echo.center.x - before.x, g.echo.center.z - before.z), swaps: g.record.swaps };
+    });
+    assert.ok(r.moved < 0.4 && r.center < 0.4 && r.swaps === 1, `swap moved the player to the echo (${JSON.stringify(r)})`);
+    await shot('06b-swap');
+    await advance(1.2);
+    assert.ok((await pe(() => window.__phaseEcho.events)).includes('echoSwap'));
+    await pe(() => { window.__phaseEcho.game.mode = 'wave'; });
+  });
+
+  await step('rewinder renders, telegraphs and rewinds without shader churn', async () => {
+    const programs0 = (await pe(() => window.__phaseEcho.stats())).programs;
+    await pe(() => { const g = window.__phaseEcho.game; g.mode = 'test'; g.debug.invulnerable = true; window.__rw = g.spawnEnemy('rewinder', { id: 0, spawn: { x: g.player.body.x + 4, z: g.player.body.z - 12 } }); });
+    let rewound = false;
+    for (let i = 0; i < 40 && !rewound; i++) { await advance(0.25); rewound = (await pe(() => window.__phaseEcho.events)).includes('rewind'); }
+    assert.ok(rewound, 'rewinder snapped back in time');
+    const programs1 = (await pe(() => window.__phaseEcho.stats())).programs;
+    assert.ok(programs1 - programs0 <= 1, `rewinder shaders were pre-compiled (${programs0} -> ${programs1})`);
+    await pe(() => { window.__rw.alive = false; const g = window.__phaseEcho.game; g.debug.invulnerable = false; g.mode = 'wave'; });
+  });
+
   await step('wave clears -> upgrade screen -> pick -> intermission', async () => {
     await pe(() => {
       const P = window.__phaseEcho, g = P.game;
@@ -232,10 +261,37 @@ try {
   await step('defeat -> results screen -> main menu', async () => {
     assert.equal(await pe(() => window.__phaseEcho.state), 'play', 'still in play before the forced defeat');
     await pe(() => { const g = window.__phaseEcho.game; g.debug.invulnerable = false; g.player.invuln = 0; g.hurtPlayer(9999, null, 'probe'); });
-    await page.waitForFunction(() => window.__phaseEcho.state === 'results', null, { timeout: 20000 });
+    // The death camera runs on real frame time: give slow software rendering room.
+    await page.waitForFunction(() => window.__phaseEcho.state === 'results', null, { timeout: 60000 });
     assert.match(await page.textContent('#results-stats'), /得分/);
     await shot('10-results');
     await page.click('#btn-menu');
+    await page.waitForFunction(() => window.__phaseEcho.state === 'menu');
+  });
+
+  await step('daily challenge: fixed seed + mutator, best run saved as a ghost and replayed next time', async () => {
+    const info = await page.textContent('#daily-info');
+    assert.match(info, /\d\d-\d\d · /, `daily info on the menu (${info})`);
+    await page.click('#btn-daily');
+    await page.waitForFunction(() => window.__phaseEcho.state === 'play');
+    const run1 = await pe(() => ({ daily: window.__phaseEcho.game.daily, mutator: window.__phaseEcho.game.mutator, seed: window.__phaseEcho.game.seed, tag: document.getElementById('run-tag').textContent }));
+    assert.ok(run1.daily && run1.mutator && run1.tag.startsWith('DAILY'), JSON.stringify(run1));
+    await pe(() => window.__phaseEcho.input.inject({ keys: ['KeyW'] }));
+    await advance(3);
+    await pe(() => window.__phaseEcho.input.release(['KeyW']));
+    assert.ok((await pe(() => window.__phaseEcho.ghost.recorded)) >= 25, 'ghost track recording');
+    await pe(() => { const g = window.__phaseEcho.game; g.player.invuln = 0; g.hurtPlayer(9999, null, 'probe'); });
+    await page.waitForFunction(() => window.__phaseEcho.state === 'results', null, { timeout: 60000 });
+    assert.match(await page.textContent('#results-sub'), /每日挑战/);
+    await page.click('#btn-again');
+    await page.waitForFunction(() => window.__phaseEcho.state === 'play');
+    const run2 = await pe(() => ({ seed: window.__phaseEcho.game.seed, ghost: window.__phaseEcho.ghost }));
+    assert.equal(run2.seed, run1.seed, 'same daily seed');
+    assert.ok(run2.ghost.best, 'previous best replays as a ghost');
+    await advance(1.5);
+    await shot('11-daily-ghost');
+    await pe(() => window.__phaseEcho.pause());
+    await page.click('#btn-quit');
     await page.waitForFunction(() => window.__phaseEcho.state === 'menu');
   });
 

@@ -25,6 +25,7 @@
       <div id="wave-label">STANDBY</div>
       <div id="enemy-count"></div>
       <div id="intermission"></div>
+      <div id="run-tag"></div>
     </div>
     <div id="top-right">
       <div id="score">0</div>
@@ -57,6 +58,7 @@
         <button data-diff="normal">标准</button><button data-diff="hard">困难</button><button data-diff="nightmare">噩梦</button>
       </div>
       <button id="btn-start" class="primary">开始行动 <small>ENTER</small></button>
+      <button id="btn-daily" class="daily"><span class="d-title">每日挑战 <small>DAILY</small></span><span id="daily-info" class="d-info"></span></button>
       <div class="row"><button id="btn-howto">玩法说明</button><button id="btn-settings">设置</button></div>
       <div id="menu-best"></div>
       <div class="credits">原创作品 · Three.js 程序化建模 · WebAudio 程序化音效 · 无外部素材</div>
@@ -97,7 +99,9 @@
             <li style="--c:#ff2bd6"><b>RESONATOR PRIME</b> 第十波首领：先击碎护盾板，瞄准核心之眼</li>
           </ul>
           <h3>其他</h3>
-          <p>绿色跳板可弹射到中央高台；四角橙色弹药站每 25 秒补充一次备弹；每波结束可三选一安装模块。</p>
+          <p>绿色跳板可弹射到中央高台；四角橙色弹药站每 25 秒补充一次备弹；每波结束可三选一安装模块（青色边框的是会改变残影行为的“残影改造”）。</p>
+          <h3>每日挑战 · 最佳残影</h3>
+          <p>每日挑战每天（UTC）固定一个种子和一条变异规则，所有人打的是同一局。你在每个模式的最佳一局会被记录下来，下次化作<b>金色身影</b>与你同场竞速，每波结束显示与它的时间差。</p>
         </div>
       </div>
       <button id="btn-howto-back">返回</button>
@@ -116,6 +120,7 @@
       <label class="set check"><input id="set-toggleads" type="checkbox"> 右键切换瞄准（而非按住）</label>
       <label class="set check"><input id="set-shake" type="checkbox"> 屏幕震动</label>
       <label class="set check"><input id="set-dmgnum" type="checkbox"> 伤害数字</label>
+      <label class="set check"><input id="set-ghost" type="checkbox"> 最佳残影（同模式历史最佳一局化作金色身影与你竞速）</label>
       <button id="btn-settings-back">返回</button>
     </div>
   </section>
