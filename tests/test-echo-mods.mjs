@@ -40,6 +40,7 @@ function startEcho(g) {
   assert.ok(Math.hypot(g.echo.center.x - before.x, g.echo.center.z - before.z) < 0.3, 'echo collapses where the player stood');
   assert.ok(chaser.pull, 'enemies near the old position are dragged into the collapse');
   assert.ok(g.player.invuln > 0, 'brief invulnerability after swapping');
+  assert.ok(g.recorder.samples.length <= 1 && g.recorder.samples.every(s => Math.hypot(s.x - echoAt.x, s.z - echoAt.z) < 0.3), 'recording restarts at the new position (no teleport inside it)');
   const again = step(g, { echoPressed: true });
   assert.ok(!again.some(e => e.type === 'echoSwap'), 'only one swap per echo');
   const rest = run(g, 1);

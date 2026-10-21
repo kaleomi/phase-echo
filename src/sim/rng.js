@@ -1,3 +1,13 @@
+// Derives an independent seed for a named sub-stream (e.g. stream 1 = wave n's spawns). Streams that the
+// player's actions never touch keep the daily challenge identical for everyone: the shared game rng is also
+// drawn by shot spread, drops and AI jitter, so its sequence diverges as soon as two players act differently.
+export function streamSeed(seed, stream, index = 0) {
+  let h = (seed >>> 0) ^ Math.imul(stream + 1, 0x9e3779b1) ^ Math.imul(index + 1, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 // Deterministic PRNG (mulberry32). Waves, spread patterns and AI timings draw from it so the
 // headless simulation tests are reproducible for a given seed.
 export function createRng(seed = 1) {

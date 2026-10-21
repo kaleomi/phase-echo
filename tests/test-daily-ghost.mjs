@@ -5,6 +5,7 @@ import { createGame } from '../src/sim/game.js';
 import { MUTATORS, dailySetup, dailySeed, dailyMutator, dailyKey } from '../src/sim/daily.js';
 import { buildSpawnQueue, DIFFICULTY } from '../src/sim/waves.js';
 import { createRng } from '../src/sim/rng.js';
+import { createBot } from './bot.mjs';
 import { createGhostRecorder, decodeGhost, ghostPoseAt, GHOST_MAX, GHOST_RATE } from '../src/sim/ghost.js';
 
 // Seeds: stable for a day, different across days; the UTC date decides the day.
@@ -19,10 +20,29 @@ const week = new Set();
 for (let d = 0; d < MUTATORS.length; d++) week.add(dailyMutator(dailyKey(new Date(Date.UTC(2026, 9, 21 + d)))).id);
 assert.equal(week.size, MUTATORS.length, 'every mutator appears within a rotation');
 
-// Same daily seed => same opening wave for everyone.
-const q1 = createGame({ seed: a.seed, mutator: a.mutator.id }), q2 = createGame({ seed: a.seed, mutator: a.mutator.id });
-q1.startWave(1); q2.startWave(1);
-assert.deepEqual(q1.spawnQueue, q2.spawnQueue, 'daily waves are identical across runs');
+// Same daily seed => same waves and same upgrade offers for everyone, however differently they play: two bots
+// with different aim, movement and echo habits must still see identical spawn queues and offers every wave.
+function dailyRun(botSeed, useEcho) {
+  const g = createGame({ seed: a.seed, mutator: a.mutator.id, invulnerable: true, firstDelay: 1 });
+  const bot = createBot(g, { seed: botSeed, aimNoise: botSeed % 2 ? 0.004 : 0.02, useEcho });
+  const queues = {}, offers = {};
+  for (let t = 0; t < 400 && g.wave <= 6 && g.mode !== 'victory'; t += 1 / 60) {
+    g.step(1 / 60, bot(1 / 60));
+    for (const e of g.drainEvents()) {
+      if (e.type === 'waveStart') queues[e.wave] = g.spawnQueue.slice();
+      if (e.type === 'upgradeOffer') offers[g.wave] = e.offers.join(',');
+    }
+  }
+  return { queues, offers, shots: g.record.shots };
+}
+const r1 = dailyRun(1, true), r2 = dailyRun(2, false);
+assert.notEqual(r1.shots, r2.shots, 'the two runs really played differently');
+const waves = Object.keys(r1.queues).filter(w => r2.queues[w]);
+assert.ok(waves.length >= 5, `compared ${waves.length} waves`);
+for (const w of waves) assert.deepEqual(r1.queues[w], r2.queues[w], `wave ${w} spawn queue identical`);
+const offerWaves = Object.keys(r1.offers).filter(w => r2.offers[w]);
+assert.ok(offerWaves.length >= 4, `compared ${offerWaves.length} offers`);
+for (const w of offerWaves) assert.equal(r1.offers[w], r2.offers[w], `wave ${w} upgrade offers identical`);
 
 // Each mutator changes something measurable.
 const base = createGame({ seed: 1 });

@@ -46,7 +46,7 @@ const input = createInput(canvas, settings);
 let game = null, menuGame = null, state = 'menu', last = performance.now(), acc = 0, frameTimes = [], deathCam = 0, pausedAt = 0;
 // Run bookkeeping: which leaderboard/ghost slot this run belongs to ('normal' | 'hard' | 'nightmare' | 'daily-YYYY-MM-DD').
 let runKey = 'normal', lastDaily = false, ghostRec = null, ghostBest = null;
-const cheats = params.has('god') || Number(params.get('wave')) > 1;
+const cheats = params.has('god') || params.has('fast') || Number(params.get('wave')) > 1; // test params never set records
 
 // ---------------------------------------------------------------- best-run ghosts (localStorage)
 const GHOST_PREFIX = 'phase-echo.ghost.v1.';
@@ -329,18 +329,24 @@ function frame(nowMs) {
   if (game.mode === 'upgrade' && state === 'play') showUpgrades();
 }
 
-// Dynamic resolution (auto quality on a GPU only): measure one-second windows of play; drop the render scale
-// quickly when the frame rate sags below ~50 fps, and creep back up after several smooth seconds.
-const dyn = { frames: 0, time: 0, good: 0 };
+// Dynamic resolution (auto quality on a GPU only), measured in one-second windows. The reference is the
+// display/browser cap - the best window seen so far, menu included - so a 50 Hz screen or a 30 fps power-saving
+// cap is not mistaken for GPU overload. The goal is min(cap, 60): a 144 Hz screen is not pushed below native
+// resolution just to chase 144 fps. Drop quickly when clearly under the goal, creep back after smooth seconds.
+const dyn = { frames: 0, time: 0, good: 0, cap: 0 };
 function adaptResolution(dt) {
   const auto = (urlQuality || settings.quality) === 'auto' && !gpu.software;
-  if (!auto || state !== 'play' || document.hidden) { dyn.frames = 0; dyn.time = 0; if (!auto && view.resolutionScale !== 1) view.setResolutionScale(1); return; }
+  if (!auto || document.hidden) { dyn.frames = 0; dyn.time = 0; if (!auto && view.resolutionScale !== 1) view.setResolutionScale(1); return; }
   dyn.frames++; dyn.time += dt;
   if (dyn.time < 1) return;
   const fps = dyn.frames / dyn.time;
   dyn.frames = 0; dyn.time = 0;
-  if (fps < 50) { dyn.good = 0; view.setResolutionScale(view.resolutionScale - (fps < 35 ? 0.15 : 0.08)); }
-  else if (fps > 57 && view.resolutionScale < 1 && ++dyn.good >= 4) { dyn.good = 0; view.setResolutionScale(view.resolutionScale + 0.05); }
+  dyn.cap = Math.max(dyn.cap, Math.min(fps, 500));
+  if (state !== 'play') return;
+  const goal = Math.min(dyn.cap, 60);
+  if (fps < goal * 0.85) { dyn.good = 0; view.setResolutionScale(view.resolutionScale - (fps < goal * 0.6 ? 0.15 : 0.08)); }
+  else if (fps > goal * 0.95 && view.resolutionScale < 1 && ++dyn.good >= 4) { dyn.good = 0; view.setResolutionScale(view.resolutionScale + 0.05); }
+  else if (fps <= goal * 0.95) dyn.good = 0;
 }
 
 function handleFlow(ev) {

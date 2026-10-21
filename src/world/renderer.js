@@ -469,6 +469,7 @@ export function createRenderer(canvas, settings) {
           audio.play('shielded', ev, 40);
           audio.play('small', ev, 40);
           if (ev.cause === 'shot') hud.toast('时间锚点已击碎 — 逆时体无法回溯', 1, 'cyan');
+          else if (ev.cause === 'echoShot') hud.toast('残影击碎了时间锚点', 1, 'cyan');
           break;
         }
         case 'enemyAttack': if (ev.kind === 'slam') { audio.play('slam', ev); addShake(0.4); fx.explosion(vec(ev, 0.2), 0xffc21f, 2); } else if (ev.kind === 'mortar') audio.play('mortarLaunch', ev); break;

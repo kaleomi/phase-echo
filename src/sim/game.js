@@ -1,7 +1,7 @@
 // PHASE ECHO game simulation. Owns every rule-level object (player, arsenal, enemies, boss, projectiles,
 // echo, waves, pickups, score) and advances them with step(dt, input). It never touches the DOM or Three.js:
 // the renderer reads state and consumes `events`, which keeps the whole game playable headless in Node.
-import { createRng } from './rng.js';
+import { createRng, streamSeed } from './rng.js';
 import { createLayout, PLAYER_SPAWN, groundAt, HALF } from './layout.js';
 import { firstBoxHit, raySphere, rayCapsule, segmentBlocked, segmentHitsCapsule, segSegDist2, normalize, clamp, yawTowards } from './geometry.js';
 import { createNavGrid, createFlowField } from './nav.js';
@@ -243,9 +243,9 @@ export function createGame(opts = {}) {
         if (h.anchor) {
           endT = h.t; kind = 'anchor'; normal = null;
           const e = h.target;
-          if (e.anchor && breakAnchor(e, facade, 'shot')) {
+          if (e.anchor && breakAnchor(e, facade, fromEcho ? 'echoShot' : 'shot')) {
             const acc = perTarget.get(e) || { dmg: 0, weak: false, shielded: false, point: null };
-            acc.dmg += e.def.rewind.breakDamage * stats.damageMult;
+            acc.dmg += e.def.rewind.breakDamage * mult;
             if (!acc.point) acc.point = { x: e.x, y: e.y, z: e.z };
             perTarget.set(e, acc);
             anyHit = true;
@@ -370,6 +370,7 @@ export function createGame(opts = {}) {
     player.dash.t = 0;
     player.invuln = Math.max(player.invuln, ECHO.swapInvuln);
     e.swapped = true;
+    g.recorder.clear(); // the teleport must not end up inside the next echo's recording
     collapseEcho(from);
     if (stats.swapSurge > 0) { g.surgeT = ECHO.surgeTime; player.dash.charges = stats.dashCharges; player.dash.recharge = 0; }
     g.record.swaps += 1;
@@ -433,7 +434,7 @@ export function createGame(opts = {}) {
     const p = player.body;
     const far = layout.gates.filter(gt => gt.id !== g.lastGate && Math.hypot(gt.spawn.x - p.x, gt.spawn.z - p.z) > 14);
     const pool = far.length ? far : layout.gates;
-    const gate = pool[Math.floor(rng.next() * pool.length)];
+    const gate = pool[Math.floor((g.waveRng || rng).next() * pool.length)];
     g.lastGate = gate.id;
     return gate;
   }
@@ -444,13 +445,14 @@ export function createGame(opts = {}) {
     g.waveTime = 0;
     g.waveHurt = false;
     g.offers = null;
+    g.waveRng = createRng(streamSeed(seed, 1, n)); // spawn queue, intervals and gate picks: independent of play
     if (isBossWave(n)) {
       g.boss = createBoss(nextId(), diff);
       g.spawnQueue = [];
       g.waveQueueLength = 12;
       emit('bossIntro', { hp: g.boss.maxHp });
     } else {
-      g.spawnQueue = buildSpawnQueue(rng, n, diff);
+      g.spawnQueue = buildSpawnQueue(g.waveRng, n, diff);
       g.waveQueueLength = g.spawnQueue.length;
       g.spawnT = 0.8;
     }
@@ -467,7 +469,7 @@ export function createGame(opts = {}) {
   }
 
   function offerUpgrades() {
-    g.offers = rollOffers(rng, g.owned, 3);
+    g.offers = rollOffers(createRng(streamSeed(seed, 2, g.wave)), g.owned, 3); // same choices -> same offers
     if (!g.offers.length) { beginIntermission(); return; }
     g.mode = 'upgrade';
     emit('upgradeOffer', { offers: g.offers.slice() });
@@ -477,7 +479,7 @@ export function createGame(opts = {}) {
     g.mode = 'intermission';
     g.modeT = INTERMISSION;
     g.offers = null;
-    const spots = rng.shuffle(layout.healthSpots).slice(0, 2);
+    const spots = createRng(streamSeed(seed, 3, g.wave)).shuffle(layout.healthSpots).slice(0, 2);
     for (const s of spots) {
       if (!g.pickups.some(p => p.kind === 'health' && Math.hypot(p.x - s.x, p.z - s.z) < 1)) {
         g.pickups.push({ id: nextId(), kind: 'health', x: s.x, y: s.y + 0.55, z: s.z, life: INTERMISSION + 40, t: 0 });
@@ -514,7 +516,7 @@ export function createGame(opts = {}) {
           const type = g.spawnQueue.shift(), gate = chooseGate();
           g.pending.push({ type, gate, t: GATE_WARNING });
           emit('gateWarn', { gate: gate.id, enemy: type, x: gate.x, z: gate.z });
-          g.spawnT = spawnInterval(g.wave, diff, rng);
+          g.spawnT = spawnInterval(g.wave, diff, g.waveRng);
         }
         if (g.boss && !g.boss.alive) {
           for (const e of g.enemies) if (e.alive) { e.alive = false; emit('kill', { id: e.id, enemy: e.type, x: e.x, y: e.y, z: e.z, points: 0, silent: true }); }
@@ -588,7 +590,7 @@ export function createGame(opts = {}) {
     }
     if (echoLive()) {
       const q = g.echo.pose;
-      if (Math.hypot(q.x - x, q.z - z) < r) echoHit(kind);
+      if (Math.hypot(q.x - x, q.y + 0.9 - y, q.z - z) < r + PLAYER.radius && !segmentBlocked({ x, y: y + 0.3, z }, { x: q.x, y: q.y + 1.0, z: q.z }, layout.boxes)) echoHit(kind);
     }
   }
 

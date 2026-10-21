@@ -68,6 +68,21 @@ assert.ok(WAVES.slice(3, 9).some(w => w.rewinder) && !WAVES.slice(0, 3).some(w =
   assert.ok(!rewound, 'the break resets the cycle: no rewind for a full cycle');
 }
 
+// The echo's replayed shots can shatter an anchor too, at echo strength (65%).
+{
+  const g = arena(3);
+  g.debug.invulnerable = true;
+  const e = place(g, -6, 14);
+  let exposed = false;
+  for (let t = 0; t < 8 && !exposed; t += 1 / 60) { step(g); exposed = anchorExposed(e); if (e.rewindT < 0.9) e.rewindT = 3; }
+  assert.ok(exposed);
+  const hp0 = e.hp, at = { ...e.anchor }, eye = eyeOf(g.player), d = { x: at.x - eye.x, y: at.y - eye.y, z: at.z - eye.z }, l = Math.hypot(d.x, d.y, d.z);
+  g.fireShot(eye, [{ x: d.x / l, y: d.y / l, z: d.z / l }], WEAPONS[2], true);
+  const brk = g.drainEvents().find(x => x.type === 'anchorBreak');
+  assert.equal(brk?.cause, 'echoShot', 'echo shot breaks the anchor');
+  assert.ok(Math.abs(hp0 - e.hp - R.breakDamage * 0.65) < 1e-6, `echo-strength break damage (${hp0 - e.hp})`);
+}
+
 // An echo collapse pulls the rewinder in and erases its anchor.
 {
   const g = arena(4);

@@ -292,7 +292,7 @@ export function breakAnchor(e, g, cause = 'shot') {
   if (!e.def.rewind || !e.anchor) return false;
   const at = e.anchor;
   e.hist = []; e.histAt = -1; e.anchor = null; e.rewindT = e.def.rewind.cycle; e.rewindTold = false; e.tell = 0;
-  if (cause === 'shot') e.stagger = e.def.rewind.breakStagger;
+  if (cause !== 'echo') e.stagger = e.def.rewind.breakStagger; // shot by you or your echo (not the collapse pull)
   g.emit('anchorBreak', { id: e.id, x: at.x, y: at.y, z: at.z, cause });
   return true;
 }

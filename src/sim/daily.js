@@ -1,4 +1,5 @@
-// Daily challenge: every UTC day gets one fixed seed (same waves, same upgrade offers for the same choices)
+// Daily challenge: every UTC day gets one fixed seed (same waves, same upgrade offers for the same choices -
+// waves and offers draw from their own seeded streams, see rng.streamSeed)
 // and one mutator that bends the rules. Mutators rotate by day number so a week shows every one of them.
 import { DIFFICULTY } from './waves.js';
 
@@ -7,7 +8,7 @@ export const MUTATORS = Object.freeze([
   { id: 'glass', cn: '玻璃大炮', en: 'GLASS CANNON', desc: '你的伤害 +50%，生命上限降为 60', stats: s => { s.damageMult += 0.5; s.maxHp = 60; } },
   { id: 'chrono', cn: '逆时潮汐', en: 'CHRONO TIDE', desc: '从第 2 波起每波额外出现 2 个逆时体，得分 ×1.2', diff: d => ({ score: d.score * 1.2, extra: { rewinder: 2 } }) },
   { id: 'arsenal', cn: '军火库', en: 'ARSENAL', desc: '弹匣 +50%，备弹上限 ×2，掉落率 +50%', stats: s => { s.magMult += 0.5; s.reserveMult += 1; s.dropMult *= 1.5; } },
-  { id: 'elite', cn: '精英潮', en: 'ELITE TIDE', desc: '敌人生命 +35%，得分 ×1.4', diff: d => ({ hp: d.hp * 1.35, score: d.score * 1.4 }) },
+  { id: 'elite', cn: '精英潮', en: 'ELITE TIDE', desc: '敌人（含首领）生命 +35%，得分 ×1.4', diff: d => ({ hp: d.hp * 1.35, bossHp: d.bossHp * 1.35, score: d.score * 1.4 }) },
   { id: 'tailwind', cn: '疾风', en: 'TAILWIND', desc: '移动速度 +20%，冲刺 +1 次且充能更快', stats: s => { s.speedMult += 0.2; s.dashCharges += 1; s.dashRechargeMult *= 0.75; } },
 ].map(m => Object.freeze(m)));
 
