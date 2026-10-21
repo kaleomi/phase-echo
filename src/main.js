@@ -258,6 +258,7 @@ function frame(nowMs) {
   last = nowMs;
   frameTimes.push(dt);
   if (frameTimes.length > 120) frameTimes.shift();
+  adaptResolution(dt);
   if (!game) { menuCamera(dt); return; }
   if (state === 'play' || state === 'dead') {
     const inp = input.sample(dt);
@@ -265,7 +266,8 @@ function frame(nowMs) {
     if (state === 'dead') { inp.fire = false; inp.moveX = inp.moveZ = 0; }
     acc += dt;
     const steps = Math.floor(acc / STEP);
-    if (steps > 0) { acc -= steps * STEP; simulate(steps * STEP, inp); }
+    // Presses stay latched until a step consumes them (frames with zero steps are common above 120 Hz).
+    if (steps > 0) { acc -= steps * STEP; simulate(steps * STEP, inp); input.consume(); }
   }
   // Events raised outside step() (upgrade choice, debug hooks, defeat by external damage) are handled here.
   const rest = game.drainEvents();
@@ -283,6 +285,20 @@ function frame(nowMs) {
   audio.setIntensity(intensity, !!game.boss);
   if (state === 'dead' && deathCam > 2.2) showResults(game.summary());
   if (game.mode === 'upgrade' && state === 'play') showUpgrades();
+}
+
+// Dynamic resolution (auto quality on a GPU only): measure one-second windows of play; drop the render scale
+// quickly when the frame rate sags below ~50 fps, and creep back up after several smooth seconds.
+const dyn = { frames: 0, time: 0, good: 0 };
+function adaptResolution(dt) {
+  const auto = (urlQuality || settings.quality) === 'auto' && !gpu.software;
+  if (!auto || state !== 'play' || document.hidden) { dyn.frames = 0; dyn.time = 0; if (!auto && view.resolutionScale !== 1) view.setResolutionScale(1); return; }
+  dyn.frames++; dyn.time += dt;
+  if (dyn.time < 1) return;
+  const fps = dyn.frames / dyn.time;
+  dyn.frames = 0; dyn.time = 0;
+  if (fps < 50) { dyn.good = 0; view.setResolutionScale(view.resolutionScale - (fps < 35 ? 0.15 : 0.08)); }
+  else if (fps > 57 && view.resolutionScale < 1 && ++dyn.good >= 4) { dyn.good = 0; view.setResolutionScale(view.resolutionScale + 0.05); }
 }
 
 function handleFlow(ev) {
@@ -318,7 +334,7 @@ window.__phaseEcho = {
   input,
   pause, resume, chooseUpgrade,
   // Deterministic fast-forward for automated tests on slow (software WebGL) machines.
-  advance(seconds) { if (!game || state !== 'play') return 0; const r = simulate(seconds, input.sample(0)); input.setAdsBlend(game.arsenal.ads); return r; },
+  advance(seconds) { if (!game || state !== 'play') return 0; const r = simulate(seconds, input.sample(0)); input.consume(); input.setAdsBlend(game.arsenal.ads); return r; },
   stats: () => ({ ...view.stats(), quality: renderSettings.quality, gpu: gpu.name, fps: frameTimes.length ? 1 / (frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length) : 0 }),
   forceState: s => setState(s),
 };

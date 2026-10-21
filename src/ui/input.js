@@ -84,7 +84,13 @@ export function createInput(target, settings) {
     unlock() { clearTimeout(lockTimer); if (document.pointerLockElement) document.exitPointerLock(); },
     get locked() { return locked; },
     get fallback() { return fallback && !locked; },
-    enable(v) { enabled = v; if (!v) { down.clear(); fire = false; if (!settings.toggleAds) ads = false; } },
+    enable(v) {
+      enabled = v;
+      if (!v) {
+        down.clear(); fire = false; if (!settings.toggleAds) ads = false;
+        latched.jump = latched.dash = latched.echo = latched.reload = latched.firePressed = false; latched.weapon = null; latched.cycle = 0;
+      }
+    },
     setLook(y, p) { yaw = y; pitch = p; },
     setAdsBlend(v) { adsBlend = v; },
     // Automation hook: inject look/keys/actions without real devices (used by the browser smoke test).
@@ -112,9 +118,14 @@ export function createInput(target, settings) {
         yaw, pitch, fire, ads, firePressed: latched.firePressed, jumpPressed: latched.jump, dashPressed: latched.dash,
         echoPressed: latched.echo, reload: latched.reload, weapon: latched.weapon, cycle: latched.cycle,
       };
+      return out;
+    },
+    // Clears the one-shot actions (jump, dash, echo, reload, swap, semi-auto trigger). Called only after a
+    // simulation step has actually consumed them: on high-refresh displays many frames run zero fixed steps,
+    // and clearing on sample() silently dropped presses made during those frames.
+    consume() {
       latched.jump = latched.dash = latched.echo = latched.reload = latched.firePressed = false;
       latched.weapon = null; latched.cycle = 0;
-      return out;
     },
   };
 }

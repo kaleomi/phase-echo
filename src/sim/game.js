@@ -19,14 +19,23 @@ export const PICKUP = Object.freeze({ health: 25, scatter: 8, rail: 4, life: 25,
 export const ENERGY_PER_DAMAGE = 0.12;
 export const BOSS_ENERGY_PER_DAMAGE = 0.05;
 
+// The arena and its navigation grids are static and read-only, so they are built once per page and shared by
+// every run (rasterising both grids costs ~100 ms, which used to stall each start / restart).
+let shared = null;
+function sharedArena() {
+  if (!shared) {
+    const layout = createLayout();
+    shared = { layout, navSmall: createNavGrid(layout, { radius: 0.45 }), navLarge: createNavGrid(layout, { radius: 0.95, usePads: false }) };
+  }
+  return shared;
+}
+
 export function createGame(opts = {}) {
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
   const diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
   const rng = createRng(seed);
-  const layout = createLayout();
+  const { layout, navSmall, navLarge } = sharedArena();
   const world = { boxes: layout.boxes, pads: layout.pads, bounds: layout.bounds };
-  const navSmall = createNavGrid(layout, { radius: 0.45 });
-  const navLarge = createNavGrid(layout, { radius: 0.95, usePads: false });
   const flows = {
     small: { player: createFlowField(navSmall), echo: createFlowField(navSmall) },
     large: { player: createFlowField(navLarge), echo: createFlowField(navLarge) },
@@ -476,6 +485,8 @@ export function createGame(opts = {}) {
   }
 
   // ---------------------------------------------------------------- flows / separation
+  const FLOW_KEYS = [['small', 'player'], ['large', 'player'], ['small', 'echo'], ['large', 'echo']];
+  let flowTurn = 0;
   function updateFlows() {
     const need = { small: { player: false, echo: false }, large: { player: false, echo: false } };
     for (const e of g.enemies) {
@@ -483,9 +494,14 @@ export function createGame(opts = {}) {
       need[e.type === 'bulwark' ? 'large' : 'small'][e.target === 'echo' && echoLive() ? 'echo' : 'player'] = true;
     }
     const pb = player.body, q = echoLive() ? g.echo.pose : null;
-    for (const size of ['small', 'large']) {
-      if (need[size].player) flows[size].player.compute(pb.x, pb.z);
-      if (need[size].echo && q) flows[size].echo.compute(q.x, q.z);
+    // At most one Dijkstra pass per step, round-robin over the fields that are stale. A player cell crossing
+    // plus a moving echo used to stack up to four passes into a single step (multi-ms spikes); now a field
+    // lags its target by a few milliseconds at most, and close-range steering is direct anyway (pathTo).
+    for (let i = 0; i < FLOW_KEYS.length; i++) {
+      const k = (flowTurn + i) % FLOW_KEYS.length, [size, who] = FLOW_KEYS[k];
+      const at = who === 'player' ? pb : q;
+      if (!need[size][who] || !at) continue;
+      if (flows[size][who].compute(at.x, at.z)) { flowTurn = (k + 1) % FLOW_KEYS.length; break; }
     }
   }
 

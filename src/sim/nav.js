@@ -58,6 +58,12 @@ export function createNavGrid(layout, { cell = 1, radius = 0.42, step = 0.45, cl
       link(u, v, base + (dh < -step ? 0.6 : 0));
     }
   }
+  // Compressed (CSR) copy of the incoming edges for the flow-field Dijkstra: flat typed arrays instead of
+  // per-cell object lists keep each recompute allocation-free and cache-friendly.
+  const inStart = new Int32Array(count + 1);
+  for (let v = 0; v < count; v++) inStart[v + 1] = inStart[v] + inTo[v].length;
+  const inFrom = new Int32Array(inStart[count]), inCost = new Float64Array(inStart[count]);
+  for (let v = 0; v < count; v++) inTo[v].forEach((e, k) => { inFrom[inStart[v] + k] = e.from; inCost[inStart[v] + k] = e.cost; });
   function nearestOpen(k, maxRing = 5) {
     if (k < 0) return -1;
     if (!blocked[k]) return k;
@@ -84,39 +90,15 @@ export function createNavGrid(layout, { cell = 1, radius = 0.42, step = 0.45, cl
     }
     return true;
   }
-  return { n, cell, origin, count, radius, step, height, blocked, pad, outFrom, inTo, cellAt, nearestOpen, straightWalkable, cx, cz, pads: layout.pads };
-}
-
-function heapPush(heap, item) {
-  heap.push(item);
-  let i = heap.length - 1;
-  while (i > 0) {
-    const p = (i - 1) >> 1;
-    if (heap[p][0] <= heap[i][0]) break;
-    [heap[p], heap[i]] = [heap[i], heap[p]];
-    i = p;
-  }
-}
-function heapPop(heap) {
-  const top = heap[0], last = heap.pop();
-  if (heap.length) {
-    heap[0] = last;
-    let i = 0;
-    for (;;) {
-      const l = i * 2 + 1, r = l + 1;
-      let m = i;
-      if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-      if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-      if (m === i) break;
-      [heap[m], heap[i]] = [heap[i], heap[m]];
-      i = m;
-    }
-  }
-  return top;
+  return { n, cell, origin, count, radius, step, height, blocked, pad, outFrom, inTo, inStart, inFrom, inCost, cellAt, nearestOpen, straightWalkable, cx, cz, pads: layout.pads };
 }
 
 export function createFlowField(grid) {
   const dist = new Float64Array(grid.count).fill(Infinity);
+  const { inStart, inFrom, inCost } = grid;
+  // Binary min-heap over parallel typed arrays (key = distance, value = cell), inlined for speed. Lazy
+  // deletion pushes at most once per relaxed edge, so the capacity is the edge count plus the source.
+  const hKey = new Float64Array(inFrom.length + 1), hVal = new Int32Array(inFrom.length + 1);
   let target = -1;
   function compute(x, z, force = false) {
     const t = grid.nearestOpen(grid.cellAt(x, z));
@@ -124,13 +106,37 @@ export function createFlowField(grid) {
     target = t;
     dist.fill(Infinity);
     dist[t] = 0;
-    const heap = [[0, t]];
-    while (heap.length) {
-      const [d, v] = heapPop(heap);
+    let size = 1;
+    hKey[0] = 0; hVal[0] = t;
+    while (size > 0) {
+      const d = hKey[0], v = hVal[0];
+      // pop: move the last entry to the root and sift it down
+      const lk = hKey[--size], lv = hVal[size];
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        if (l >= size) break;
+        const m = l + 1 < size && hKey[l + 1] < hKey[l] ? l + 1 : l;
+        if (hKey[m] >= lk) break;
+        hKey[i] = hKey[m]; hVal[i] = hVal[m];
+        i = m;
+      }
+      hKey[i] = lk; hVal[i] = lv;
       if (d > dist[v]) continue;
-      for (const e of grid.inTo[v]) {
-        const nd = d + e.cost;
-        if (nd < dist[e.from]) { dist[e.from] = nd; heapPush(heap, [nd, e.from]); }
+      for (let k = inStart[v], end = inStart[v + 1]; k < end; k++) {
+        const u = inFrom[k], nd = d + inCost[k];
+        if (nd < dist[u]) {
+          dist[u] = nd;
+          // push: sift up from the end
+          let j = size++;
+          while (j > 0) {
+            const p = (j - 1) >> 1;
+            if (hKey[p] <= nd) break;
+            hKey[j] = hKey[p]; hVal[j] = hVal[p];
+            j = p;
+          }
+          hKey[j] = nd; hVal[j] = u;
+        }
       }
     }
     return true;

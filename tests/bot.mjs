@@ -3,8 +3,11 @@
 import { yawTowards, pitchTowards, segmentBlocked, wrapAngle } from '../src/sim/geometry.js';
 import { weakCenter } from '../src/sim/enemies.js';
 import { eyeOf } from '../src/sim/player.js';
+import { createRng } from '../src/sim/rng.js';
 
-export function createBot(game, { useEcho = true, aimNoise = 0.004 } = {}) {
+export function createBot(game, { useEcho = true, aimNoise = 0.004, seed } = {}) {
+  // Seeded (not Math.random) so a given game seed always produces the same bot run and the tests are stable.
+  const rand = createRng(((seed ?? game.seed) ^ 0x9e3779b9) >>> 0).next;
   let strafe = 1, strafeT = 0, prevFire = false, jumpT = 2;
   return function input(dt) {
     const g = game, p = g.player, eye = eyeOf(p);
@@ -20,11 +23,11 @@ export function createBot(game, { useEcho = true, aimNoise = 0.004 } = {}) {
     const visible = threats.filter(t => !segmentBlocked(eye, t.aim, g.layout.boxes)).sort((a, b) => a.d - b.d);
     const target = visible[0] || threats.sort((a, b) => a.d - b.d)[0];
     strafeT -= dt;
-    if (strafeT <= 0) { strafe = -strafe; strafeT = 0.8 + Math.random() * 1.2; }
+    if (strafeT <= 0) { strafe = -strafe; strafeT = 0.8 + rand() * 1.2; }
     jumpT -= dt;
     if (target) {
       const dx = target.aim.x - eye.x, dy = target.aim.y - eye.y, dz = target.aim.z - eye.z;
-      const wantYaw = yawTowards(dx, dz) + (Math.random() - 0.5) * aimNoise, wantPitch = pitchTowards(dx, dy, dz) + (Math.random() - 0.5) * aimNoise;
+      const wantYaw = yawTowards(dx, dz) + (rand() - 0.5) * aimNoise, wantPitch = pitchTowards(dx, dy, dz) + (rand() - 0.5) * aimNoise;
       const turn = 12 * dt;
       input.yaw = p.yaw + Math.max(-turn, Math.min(turn, wrapAngle(wantYaw - p.yaw)));
       input.pitch = p.pitch + Math.max(-turn, Math.min(turn, wantPitch - p.pitch)) - g.arsenal.aimOffset.pitch * 0.9;
@@ -47,8 +50,8 @@ export function createBot(game, { useEcho = true, aimNoise = 0.004 } = {}) {
     }
     if (g.arsenal.slot.mag === 0) input.reload = true;
     if (useEcho && p.energy >= 100 && (p.hp < 60 || g.enemies.filter(e => e.alive).length >= 4)) input.echoPressed = true;
-    if (p.hp < 45 && p.dash.charges > 0 && Math.random() < 0.05) input.dashPressed = true;
-    if (jumpT <= 0) { input.jumpPressed = true; jumpT = 1.5 + Math.random() * 2; }
+    if (p.hp < 45 && p.dash.charges > 0 && rand() < 0.05) input.dashPressed = true;
+    if (jumpT <= 0) { input.jumpPressed = true; jumpT = 1.5 + rand() * 2; }
     prevFire = input.fire;
     return input;
   };

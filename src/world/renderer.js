@@ -50,14 +50,29 @@ export function createRenderer(canvas, settings) {
   let fovKick = 0, echoFx = 0, hurtFx = 0, time = 0, quality = settings.quality;
   const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), muzzle = new THREE.Vector3();
 
+  // Pixel ratio = quality cap x dynamic resolution scale. The composer keeps its own pixel ratio (captured
+  // once at construction, i.e. 1), so it must be updated too - otherwise high/medium quality rendered the
+  // scene at 1x and stretched it on HiDPI screens.
+  let resScale = 1;
+  function applyPixelRatio() {
+    const cap = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 2 : quality === 'medium' ? 1.5 : 1);
+    const pr = Math.max(0.5, cap * resScale);
+    renderer.setPixelRatio(pr);
+    composer.setPixelRatio(pr);
+    resize();
+  }
   function setQuality(q) {
     quality = q;
-    const pr = Math.min(window.devicePixelRatio || 1, q === 'high' ? 2 : q === 'medium' ? 1.5 : 1);
-    renderer.setPixelRatio(pr);
     renderer.shadowMap.enabled = q !== 'low';
     if (arena) { arena.setShadows(q !== 'low'); arena.setAccents(q !== 'low'); }
     bloom.enabled = q !== 'low';
-    resize();
+    applyPixelRatio();
+  }
+  function setResolutionScale(s) {
+    const v = Math.max(0.5, Math.min(1, s));
+    if (Math.abs(v - resScale) < 1e-3) return;
+    resScale = v;
+    applyPixelRatio();
   }
   function resize() {
     const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
@@ -496,10 +511,11 @@ export function createRenderer(canvas, settings) {
     } catch { return { name: 'unknown', software: false }; }
   }
   const api = {
-    renderer, scene, camera, rendererInfo, setup, render, handleEvents, resize, setQuality, clearWorld, vm, hideViewmodel: false,
+    renderer, scene, camera, rendererInfo, setup, render, handleEvents, resize, setQuality, setResolutionScale, clearWorld, vm, hideViewmodel: false,
+    get resolutionScale() { return resScale; },
     look(dx, dy) { vm.look(dx, dy); },
     get fx() { return fx; },
-    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, programs: renderer.info.programs?.length ?? 0, fx: fx.count() }; },
+    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, programs: renderer.info.programs?.length ?? 0, fx: fx.count(), pixelRatio: renderer.getPixelRatio(), resScale }; },
   };
   return api;
 }
